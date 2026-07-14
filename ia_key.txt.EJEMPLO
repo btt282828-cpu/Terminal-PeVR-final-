@@ -1,0 +1,31 @@
+PEGA-AQUI-TU-KEY-DE-GOOGLE-Y-BORRA-ESTA-LINEA
+
+# ─────────────────────────────────────────────────────────────
+#  INSTRUCCIONES (borra todo esto antes de guardar, o déjalo: el
+#  terminal solo lee la PRIMERA línea, el resto lo ignora)
+# ─────────────────────────────────────────────────────────────
+#
+#  1. Ve a:  https://aistudio.google.com/apikey
+#  2. Inicia sesión con tu cuenta de Google.
+#  3. Pulsa "Create API key" (Crear clave de API). Es GRATIS.
+#  4. Copia la clave (empieza por "AIza...").
+#  5. Pégala en la PRIMERA línea de este archivo, borrando el texto
+#     "PEGA-AQUI-TU-KEY..." que hay arriba.
+#  6. Renombra este archivo de  "ia_key.txt.EJEMPLO"  a  "ia_key.txt"
+#     (quítale el ".EJEMPLO" del final).
+#  7. Déjalo en la MISMA carpeta que rotacion.py
+#  8. Ejecuta rotacion.py normalmente.
+#
+#  Al ejecutar verás en la consola:
+#     "IA automatica: key encontrada, consultando al proveedor ..."
+#  y la respuesta del gestor macro aparecerá ya escrita en la
+#  pestaña "Modo Claude" del terminal.
+#
+#  SEGURIDAD: si esta carpeta es un repositorio de GitHub, el propio
+#  terminal añade "ia_key.txt" a .gitignore automáticamente para que
+#  tu clave NUNCA se suba a internet. Aun así, no la compartas.
+#
+#  ¿Quieres más análisis automáticos además del maestro? Abre
+#  rotacion.py y busca IA_AUTO_EXTRA. Por ejemplo:
+#     IA_AUTO_EXTRA = ["ciclo", "flujos"]
+# ─────────────────────────────────────────────────────────────

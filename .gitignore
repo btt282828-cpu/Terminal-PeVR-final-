@@ -1,0 +1,14 @@
+# NUNCA subir claves al repositorio (van en Secrets de GitHub)
+anthropic_key.txt
+ia_key.txt
+clave_fred.txt
+*.key
+anthropic_key.txt.EJEMPLO
+ia_key.txt.EJEMPLO
+
+# temporales de Python
+__pycache__/
+*.pyc
+
+# el sitio generado (lo crea la Action, no hace falta versionarlo)
+site/
