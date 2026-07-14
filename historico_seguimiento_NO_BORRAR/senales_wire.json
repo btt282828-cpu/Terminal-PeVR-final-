@@ -1,6 +1,24 @@
 [
 {
 "date": "2026-07-14",
+"tag": "GIRO",
+"sym": "SOXX",
+"dir": -1
+},
+{
+"date": "2026-07-14",
+"tag": "GIRO",
+"sym": "SMH",
+"dir": -1
+},
+{
+"date": "2026-07-14",
+"tag": "GIRO",
+"sym": "SKYY",
+"dir": 1
+},
+{
+"date": "2026-07-14",
 "tag": "RISK",
 "sym": "XTB",
 "dir": -1
@@ -27,6 +45,12 @@
 "date": "2026-07-14",
 "tag": "SUELO",
 "sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-14",
+"tag": "SUELO",
+"sym": "BOTZ",
 "dir": 1
 },
 {
