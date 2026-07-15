@@ -2,25 +2,13 @@
 {
 "date": "2026-07-14",
 "tag": "GIRO",
-"sym": "MERCADO",
+"sym": "DRIV",
 "dir": -1
 },
 {
 "date": "2026-07-14",
 "tag": "GIRO",
-"sym": "SOXX",
-"dir": -1
-},
-{
-"date": "2026-07-14",
-"tag": "GIRO",
-"sym": "SMH",
-"dir": -1
-},
-{
-"date": "2026-07-14",
-"tag": "GIRO",
-"sym": "IBIT",
+"sym": "QTUM",
 "dir": -1
 },
 {
