@@ -76,5 +76,77 @@
 "tag": "EARLY",
 "sym": "KWEB",
 "dir": 1
+},
+{
+"date": "2026-07-15",
+"tag": "GIRO",
+"sym": "SOXX",
+"dir": -1
+},
+{
+"date": "2026-07-15",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-07-15",
+"tag": "FLOW",
+"sym": "JETS",
+"dir": -1
+},
+{
+"date": "2026-07-15",
+"tag": "0/3",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-15",
+"tag": "0/3",
+"sym": "BOTZ",
+"dir": 1
+},
+{
+"date": "2026-07-15",
+"tag": "SUELO",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-15",
+"tag": "SUELO",
+"sym": "BOTZ",
+"dir": 1
+},
+{
+"date": "2026-07-15",
+"tag": "SUELO",
+"sym": "SLV",
+"dir": 0
+},
+{
+"date": "2026-07-15",
+"tag": "SUELO",
+"sym": "SIL",
+"dir": 0
+},
+{
+"date": "2026-07-15",
+"tag": "EARLY",
+"sym": "GDX",
+"dir": 1
+},
+{
+"date": "2026-07-15",
+"tag": "EARLY",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-15",
+"tag": "EARLY",
+"sym": "KWEB",
+"dir": 1
 }
 ]
