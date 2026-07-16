@@ -79,6 +79,30 @@
 },
 {
 "date": "2026-07-15",
+"tag": "RÉGIMEN",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-07-15",
+"tag": "NOCTURNO",
+"sym": "VGK",
+"dir": 1
+},
+{
+"date": "2026-07-15",
+"tag": "GRADUADO",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-15",
+"tag": "GRADUADO",
+"sym": "XLC",
+"dir": 1
+},
+{
+"date": "2026-07-15",
 "tag": "GIRO",
 "sym": "SOXX",
 "dir": -1
@@ -122,13 +146,13 @@
 {
 "date": "2026-07-15",
 "tag": "SUELO",
-"sym": "SLV",
+"sym": "XLB",
 "dir": 0
 },
 {
 "date": "2026-07-15",
 "tag": "SUELO",
-"sym": "SIL",
+"sym": "XLI",
 "dir": 0
 },
 {
