@@ -172,5 +172,95 @@
 "tag": "EARLY",
 "sym": "KWEB",
 "dir": 1
+},
+{
+"date": "2026-07-16",
+"tag": "RÉGIMEN",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-07-16",
+"tag": "CLÍMAX",
+"sym": "XLP",
+"dir": -1
+},
+{
+"date": "2026-07-16",
+"tag": "CLÍMAX",
+"sym": "KRE",
+"dir": -1
+},
+{
+"date": "2026-07-16",
+"tag": "NOCTURNO",
+"sym": "KWEB",
+"dir": 1
+},
+{
+"date": "2026-07-16",
+"tag": "GRADUADO",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-16",
+"tag": "GRADUADO",
+"sym": "XLC",
+"dir": 1
+},
+{
+"date": "2026-07-16",
+"tag": "GIRO",
+"sym": "KWEB",
+"dir": -1
+},
+{
+"date": "2026-07-16",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-07-16",
+"tag": "0/3",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-16",
+"tag": "SUELO",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-16",
+"tag": "SUELO",
+"sym": "XLB",
+"dir": 0
+},
+{
+"date": "2026-07-16",
+"tag": "SUELO",
+"sym": "XLI",
+"dir": 0
+},
+{
+"date": "2026-07-16",
+"tag": "EARLY",
+"sym": "GDX",
+"dir": 1
+},
+{
+"date": "2026-07-16",
+"tag": "EARLY",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-16",
+"tag": "EARLY",
+"sym": "KWEB",
+"dir": 1
 }
 ]
