@@ -1831,6 +1831,222 @@ def heatmap_color(v):
 
 
 # ----------------------------------------------------------------------
+# FICHAS DE DECISION (pestana Operativa rediseñada): recopila TODO lo que ya
+# calcula el terminal (RRG, flujo, scores, suelos, centinela, plan, correlaciones)
+# y lo sintetiza en una ficha por activo: score 0-100, semaforos, direccion,
+# motivos a favor/en contra y ranking con deduplicacion de exposiciones gemelas.
+# Principio: MENOS ES MAS — la pantalla decide, el detalle queda plegado.
+# ----------------------------------------------------------------------
+PADRE_SECTOR = {"SMH": "XLK", "SOXX": "XLK", "IGV": "XLK", "SKYY": "XLK", "CIBR": "XLK", "QTUM": "XLK",
+                "BOTZ": "XLI", "ARKK": "XLK", "ARKF": "XLF", "ARKX": "XLI", "DRIV": "XLY",
+                "XBI": "XLV", "KRE": "XLF", "ITB": "XLY", "XRT": "XLY", "JETS": "XLI",
+                "XOP": "XLE", "OIH": "XLE", "TAN": "XLU", "ICLN": "XLU", "FAN": "XLU", "HYDR": "XLU",
+                "GRID": "XLU", "PAVE": "XLI", "XME": "XLB", "GDX": "XLB", "SIL": "XLB", "SLV": "XLB",
+                "MOO": "XLB", "FIW": "XLU", "CGW": "XLU",
+                "KWEB": "XLK", "FXI": "XLF", "EWJ": "XLF", "INDA": "XLK", "EWZ": "XLB",
+                "VGK": "XLF", "EWY": "XLK", "IBIT": None}
+GEMELOS_FIJOS = [("SMH", "SOXX"), ("XLE", "XOP", "OIH"), ("TAN", "ICLN", "FAN"),
+                 ("GDX", "SIL"), ("KWEB", "FXI"), ("ARKK", "ARKF"), ("FIW", "CGW")]
+
+def _semaforo(v):
+    return "🟢" if v >= 65 else ("🟡" if v >= 45 else "🔴")
+
+def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen, mi_syms, analogos=None, tau=None):
+    try:
+        score_by = {r["sym"]: r for r in (scores or [])}
+        suelo_by = {r["sym"]: r for r in (suelo or [])}
+        universo = [s for s in (SECTORS + THEMATIC + EXTRA) if s in rrg and s in df.columns]
+        rets_w = df.pct_change().iloc[-26:]                       # 26 semanas para correlaciones
+        # --- contexto de mercado (igual para todos) ---
+        dd_now = (plan or {}).get("dd", 0) or 0
+        est_cent = (centinela or {}).get("estado", "")
+        mkt = {"ROTACION": 78, "ACUMULACION": 82, "TRANSICION": 55, "DISTRIBUCION": 25}.get(est_cent, 55)
+        mkt = max(5, min(95, mkt + (10 if dd_now > -2 else (-12 if dd_now <= -5 else 0))))
+        cartera_set = set(chosen or []) | set(mi_syms or [])
+        vols = {}
+        for s in universo:
+            try:
+                dd_ = daily.get(s)
+                vols[s] = float(dd_["Close"].pct_change().iloc[-63:].std()) if dd_ is not None else None
+            except Exception:
+                vols[s] = None
+        vlist = sorted(v for v in vols.values() if v is not None)
+        def _volpct(s):
+            v = vols.get(s)
+            if v is None or not vlist:
+                return 50
+            return int(100 * sum(1 for x in vlist if x <= v) / len(vlist))
+        fichas = []
+        for s in universo:
+            g = rrg[s]; f = flow.get(s, {}); sc = score_by.get(s, {}); su = suelo_by.get(s)
+            quad, cmf = g["quad"], f.get("cmf")
+            distrib = (f.get("diverg") == "distribucion oculta")
+            # componente ETF (fuerza propia)
+            base_q = {"leading": 78, "improving": 60, "weakening": 38, "lagging": 22}[quad]
+            c_etf = base_q + (10 if g.get("trend") else 0) + max(-12, min(12, (g["mom"] - 100) * 2.5))
+            c_etf = max(3, min(97, c_etf))
+            # sector padre
+            padre = PADRE_SECTOR.get(s, s if s in SECTORS else None)
+            if padre and padre in rrg:
+                gq = rrg[padre]["quad"]
+                c_sec = {"leading": 82, "improving": 62, "weakening": 38, "lagging": 20}[gq] + max(-8, min(8, rrg[padre]["dmom"] * 3))
+                sec_lbl = f"{padre} {gq}"
+            else:
+                c_sec, sec_lbl = c_etf, "—"
+            c_sec = max(3, min(97, c_sec))
+            # industria = fuerza del ETF RELATIVA a su padre (RS 13 semanas)
+            c_ind = 50
+            if padre and padre in df.columns and s in df.columns:
+                try:
+                    rsp = (df[s] / df[padre]).dropna()
+                    ch = float(rsp.iloc[-1] / rsp.iloc[-min(13, len(rsp) - 1) - 1] - 1) * 100
+                    c_ind = max(5, min(95, 50 + ch * 3))
+                except Exception:
+                    pass
+            # flujo institucional
+            if cmf is None:
+                c_flu, flu_lbl = 50, "sin dato"
+            else:
+                c_flu = 85 if cmf > 0.10 else 70 if cmf > 0.05 else 50 if cmf > -0.05 else 32 if cmf > -0.10 else 15
+                if f.get("obv_above"): c_flu = min(97, c_flu + 8)
+                if f.get("cmf_mejora"): c_flu = min(97, c_flu + 8)
+                if distrib: c_flu = max(3, c_flu - 22)
+                flu_lbl = "ENTRANDO" if cmf > 0.05 else "SALIENDO" if cmf < -0.05 else "neutro"
+            # riesgo (mas alto = mas seguro)
+            vp = _volpct(s)
+            c_rie = 100 - vp
+            hi52 = None
+            try:
+                dcl = daily.get(s)["Close"].dropna()
+                hi52 = float(dcl.iloc[-1] / dcl.iloc[-252:].max() * 100)
+            except Exception:
+                pass
+            if hi52 is not None:
+                if hi52 >= 97: c_rie -= 12                       # extendida en maximos
+                if hi52 <= 72 and not (su and su["pts"] >= 8): c_rie -= 15   # cuchillo cayendo sin suelo
+            if s in SECTORES_EXPLOSIVOS: c_rie -= 8
+            c_rie = max(3, min(97, c_rie))
+            # correlacion con lo ya abierto
+            c_cor, cor_lbl = 85, "libre"
+            try:
+                otros = [x for x in cartera_set if x != s and x in rets_w.columns]
+                if otros and s in rets_w.columns:
+                    cmax, cwho = 0.0, ""
+                    for o in otros:
+                        cv = rets_w[s].corr(rets_w[o])
+                        if cv == cv and abs(cv) > cmax:
+                            cmax, cwho = abs(cv), o
+                    c_cor = 88 if cmax < .5 else 60 if cmax < .8 else 28
+                    cor_lbl = f"max {cmax:.2f} con {cwho}" if cwho else "libre"
+            except Exception:
+                pass
+            # score global ponderado
+            score = int(round(c_etf * .25 + c_flu * .25 + c_sec * .15 + mkt * .15 + c_rie * .10 + c_cor * .10))
+            # prob. exito 4 semanas: frecuencia historica del propio ETF en el MISMO cuadrante + mismo signo de flujo
+            prob = None
+            try:
+                rat = pd.Series(g["ratio_series"], index=df.index)
+                mo = pd.Series(g["mom_series"], index=df.index)
+                sw = df[s]
+                fwd4 = sw.shift(-4) / sw - 1
+                mq = rat.combine(mo, lambda a, b: quad_of(a, b) if a == a and b == b else None)
+                mask = (mq == quad) & fwd4.notna()
+                n = int(mask.sum())
+                if n >= 8:
+                    p = float((fwd4[mask] > 0).mean())
+                    den = 1 + 1.96 ** 2 / n
+                    ctr = (p + 1.96 ** 2 / (2 * n)) / den
+                    rad = 1.96 * math.sqrt(max(p * (1 - p), 1e-9) / n + 1.96 ** 2 / (4 * n * n)) / den
+                    prob = {"p": int(round(p * 100)), "lo": int(round((ctr - rad) * 100)),
+                            "hi": int(round((ctr + rad) * 100)), "n": n}
+            except Exception:
+                pass
+            # direccion
+            en_cart = s in cartera_set
+            es_suelo = bool(su and su["pts"] >= 8 and not su.get("sangra"))
+            if en_cart and (distrib or (quad == "lagging" and g["pquad"] == "weakening") or score < 38):
+                direc, dcol = "VENDER", "#F4607A"
+            elif score >= 68 and c_flu >= 50 and mkt >= 45 and quad in ("leading", "improving") and not distrib:
+                direc, dcol = "COMPRAR", "#2FD08A"
+            elif es_suelo and c_flu >= 40:
+                direc, dcol = "COMPRAR (suelo)", "#4CC2E0"
+            else:
+                direc, dcol = "ESPERAR", "#F4B740"
+            # proximo lider temprano
+            lider_temp = (quad in ("improving",) or (quad == "lagging" and g["dmom"] > 0.5)) and \
+                         g["ratio"] < 100 and (f.get("cmf_mejora") or (cmf is not None and cmf > 0))
+            # motivos a favor / en contra (max 5 / 3)
+            favor, contra = [], []
+            if quad == "leading": favor.append("líder confirmado del RRG")
+            if quad == "improving": favor.append("entrando en Mejorando (acumulación temprana)")
+            if cmf is not None and cmf > 0.05: favor.append(f"dinero institucional entrando (CMF {cmf:+.2f})")
+            if f.get("obv_cross"): favor.append("cruce alcista del OBV")
+            if f.get("vol_break"): favor.append("ruptura con volumen")
+            if g.get("trend"): favor.append("precio sobre su media de 20 semanas")
+            if es_suelo: favor.append(f"suelo DURMIENTES {su['pts']}/10, dejó de sangrar")
+            if lider_temp: favor.append("🌱 síntomas de próximo líder (RS acelera antes de girar)")
+            if c_ind >= 65: favor.append("más fuerte que su propio sector")
+            if distrib: contra.append("⚠ distribución oculta: precio sube, dinero SALE")
+            if hi52 is not None and hi52 >= 97: contra.append("extendida en máximos: mala entrada")
+            if hi52 is not None and hi52 <= 72 and not es_suelo: contra.append("cuchillo cayendo sin señal de suelo")
+            if c_cor <= 30: contra.append(f"duplica exposición ya abierta ({cor_lbl})")
+            if c_sec <= 35: contra.append(f"su sector padre está débil ({sec_lbl})")
+            if tau and tau.get("activa") and quad == "lagging": contra.append("ventana τ activa: presión vendedora mecánica sobre losers hasta " + tau["win_fin"])
+            if mkt <= 35: contra.append("el mercado está en distribución: bajar tamaño")
+            if prob and prob["n"] < 15: contra.append(f"muestra corta (n={prob['n']}): confianza baja")
+            # conclusion con invalidacion (falsable)
+            if direc.startswith("COMPRAR"):
+                concl = "Se invalida si el CMF cae bajo −0.05 o pierde su media de 20 semanas al cierre del viernes."
+            elif direc == "VENDER":
+                concl = "Se revierte si recupera Mejorando con CMF > 0 dos viernes seguidos."
+            else:
+                gat = "giro confirmado + CMF > 0" if quad in ("lagging", "improving") else "recuperar impulso (mom > 100)"
+                concl = f"Gatillo para entrar: {gat}, confirmado en cierre de viernes."
+            fichas.append({"sym": s, "score": score, "direc": direc, "dcol": dcol,
+                           "c": {"mercado": int(round(mkt)), "sector": int(round(c_sec)), "industria": int(round(c_ind)),
+                                 "etf": int(round(c_etf)), "flujo": int(round(c_flu)), "riesgo": int(round(c_rie)),
+                                 "corr": int(round(c_cor))},
+                           "quad": quad, "cmf": cmf, "flu_lbl": flu_lbl, "cor_lbl": cor_lbl,
+                           "sec_lbl": sec_lbl, "hi52": (round(hi52) if hi52 is not None else None),
+                           "rel1": g.get("rel1"), "rel4": g.get("rel4"), "abs13": sc.get("abs_mom"),
+                           "prob": prob, "favor": favor[:5], "contra": contra[:3], "concl": concl,
+                           "en_cart": en_cart, "suelo": es_suelo, "lider_temp": lider_temp})
+        # --- deduplicacion: gemelos fijos + correlacion semanal > .92 -> un solo representante ---
+        grupo_de = {}
+        for gpo in GEMELOS_FIJOS:
+            pres = [x for x in gpo if x in {ff["sym"] for ff in fichas}]
+            for x in pres:
+                grupo_de[x] = pres[0]
+        try:
+            syms = [ff["sym"] for ff in fichas]
+            for i, a in enumerate(syms):
+                for b in syms[i + 1:]:
+                    if a in rets_w.columns and b in rets_w.columns and a not in grupo_de and b not in grupo_de:
+                        cv = rets_w[a].corr(rets_w[b])
+                        if cv == cv and cv > .92:
+                            grupo_de[a] = a; grupo_de[b] = a
+        except Exception:
+            pass
+        raiz = {}
+        for ff in fichas:
+            r = grupo_de.get(ff["sym"], ff["sym"])
+            raiz.setdefault(r, []).append(ff)
+        finales = []
+        for r, miembros in raiz.items():
+            miembros.sort(key=lambda x: -x["score"])
+            jefe = miembros[0]
+            if len(miembros) > 1:
+                jefe = dict(jefe)
+                jefe["gemelos"] = [{"sym": m["sym"], "score": m["score"], "direc": m["direc"]} for m in miembros[1:]]
+                # coherencia: los gemelos heredan la senal del mejor (una sola recomendacion por exposicion)
+            finales.append(jefe)
+        finales.sort(key=lambda x: -x["score"])
+        return finales
+    except Exception as e:
+        print(f"  fichas de decision: {e}")
+        return None
+
+# ----------------------------------------------------------------------
 # Backtest causal: sobreponderar Lider+Mejorando vs comprar y mantener el indice
 # ----------------------------------------------------------------------
 def backtest(df, rrg, hold=("leading", "improving"), trend=None, max_pos=None, weight=None, buffer=None):
@@ -2115,15 +2331,233 @@ def fetch_fear_greed():
     except Exception:
         return None
 
-def cash_plan(close):
+def cash_plan(close, hl=None):
+    """Plan de liquidez. FIX: el pico ahora es el MAXIMO INTRADIA real (Highs), no solo el maximo de cierres,
+    y se registra la FECHA del ultimo dato para detectar series desfasadas (Stooq suele llegar con 1 dia de retraso).
+    Esa combinacion (pico de cierres + dato viejo) hacia que el terminal marcara menos caida de la real."""
     close = close.dropna()
-    peak = float(close.cummax().iloc[-1])
+    peak_close = float(close.cummax().iloc[-1])
+    peak = peak_close
+    if hl is not None and "High" in getattr(hl, "columns", []):
+        try:
+            hi_max = float(hl["High"].dropna().cummax().iloc[-1])
+            peak = max(peak, hi_max)                      # ATH intradia real (lo que mira todo el mundo)
+        except Exception:
+            pass
     last = float(close.iloc[-1])
+    try:
+        fecha = close.index[-1].date()
+    except Exception:
+        fecha = None
+    # ¿dato viejo? dias habiles entre el ultimo dato y hoy (0 = fresco; >=1 = falta al menos una sesion)
+    stale = 0
+    if fecha is not None:
+        try:
+            stale = max(0, len(pd.bdate_range(fecha, dt.date.today())) - 1)
+            # si hoy es habil y el mercado USA aun no ha cerrado, no cuentes hoy como sesion perdida
+            if stale >= 1 and dt.date.today().weekday() < 5 and dt.datetime.now().hour < 22:
+                stale -= 1
+        except Exception:
+            pass
     rungs = []
     for thr, pct in CASH_PLAN:
         level = peak * (1 - thr / 100)
         rungs.append({"thr": thr, "pct": pct, "level": round(level, 2), "hit": last <= level})
-    return {"peak": round(peak, 2), "last": round(last, 2), "dd": round((last / peak - 1) * 100, 1), "rungs": rungs}
+    return {"peak": round(peak, 2), "peak_close": round(peak_close, 2), "last": round(last, 2),
+            "dd": round((last / peak - 1) * 100, 1),
+            "dd_close": round((last / peak_close - 1) * 100, 1),
+            "fecha": str(fecha) if fecha else "?", "stale": stale, "rungs": rungs}
+
+def refrescar_con_yahoo(close, hl, ysym):
+    """Stooq suele llegar con 1 sesion de RETRASO: anade los ultimos dias frescos desde Yahoo
+    (auto_adjust=False: son indices, sin dividendos). Este retraso era la causa de que el terminal
+    marcara menos caida desde ATH de la real. Devuelve (close, hl) actualizados."""
+    if yf is None or close is None or not len(close.dropna()):
+        return close, hl
+    try:
+        g = yf.download(ysym, period="10d", progress=False, auto_adjust=False)
+        if g is None or not len(g):
+            return close, hl
+        c = g["Close"]
+        if hasattr(c, "columns"):
+            c = c.iloc[:, 0]
+        c = c.dropna()
+        c.index = pd.to_datetime(c.index).tz_localize(None).normalize()
+        base = close.dropna().copy()
+        base.index = pd.to_datetime(base.index).tz_localize(None).normalize() if getattr(base.index, "tz", None) is not None else pd.to_datetime(base.index).normalize()
+        nuevos = c[c.index > base.index[-1]]
+        if len(nuevos):
+            base = pd.concat([base, nuevos])
+            print(f"  [{ysym}] serie larga refrescada con Yahoo: +{len(nuevos)} sesion(es), ultima {nuevos.index[-1].date()}")
+        close = base
+        if {"High", "Low"}.issubset(g.columns):
+            h, l = g["High"], g["Low"]
+            if hasattr(h, "columns"): h = h.iloc[:, 0]
+            if hasattr(l, "columns"): l = l.iloc[:, 0]
+            nhl = pd.DataFrame({"High": h, "Low": l}).dropna()
+            nhl.index = pd.to_datetime(nhl.index).tz_localize(None).normalize()
+            if hl is not None and len(hl):
+                bhl = hl.copy()
+                bhl.index = pd.to_datetime(bhl.index).normalize()
+                add = nhl[nhl.index > bhl.index[-1]]
+                hl = pd.concat([bhl, add]) if len(add) else bhl
+            else:
+                hl = nhl
+    except Exception as e:
+        print(f"  [{ysym}] no se pudo refrescar con Yahoo: {e}")
+    return close, hl
+
+def fetch_es_futuro():
+    """Ultimo precio del FUTURO del S&P (ES=F). El futuro cotiza casi 24h: es la referencia mas fresca
+    que existe del indice (lo que Pedro ve en el broker). Best-effort; None si falla."""
+    if yf is None:
+        return None
+    try:
+        g = yf.download("ES=F", period="5d", interval="1h", progress=False, auto_adjust=False)
+        if g is None or not len(g):
+            return None
+        c = g["Close"]
+        if hasattr(c, "columns"):
+            c = c.iloc[:, 0]
+        c = c.dropna()
+        if not len(c):
+            return None
+        ts = c.index[-1]
+        try:
+            ts = ts.tz_convert("Europe/Madrid").strftime("%d %b %H:%M")
+        except Exception:
+            ts = str(ts)[:16]
+        return {"last": round(float(c.iloc[-1]), 2), "ts": ts}
+    except Exception:
+        return None
+
+# ----------------------------------------------------------------------
+# CALENDARIO tau — ciclo intramensual de momentum (Nathan/Suominen/Tasa 2026):
+# la venta forzada de LOSERS por demanda de liquidez de fin de mes se concentra en
+# 6 sesiones que terminan 4 dias antes de fin de mes. Con T+1 (EE.UU., 2024) la
+# presion se desplaza 1 sesion hacia fin de mes -> ventana efectiva [tau-8, tau-3].
+# tau = ULTIMA sesion del mes. Es un OVERLAY informativo, no un sistema.
+# ----------------------------------------------------------------------
+def _nyse_bdays(d0, d1):
+    """Sesiones NYSE aproximadas entre d0 y d1 (incl.): laborables menos festivos NYSE."""
+    from pandas.tseries.holiday import (AbstractHolidayCalendar, Holiday, nearest_workday,
+                                        USMartinLutherKingJr, USPresidentsDay, GoodFriday,
+                                        USMemorialDay, USLaborDay, USThanksgivingDay)
+    class _NYSE(AbstractHolidayCalendar):
+        rules = [Holiday("NewYear", month=1, day=1, observance=nearest_workday),
+                 USMartinLutherKingJr, USPresidentsDay, GoodFriday, USMemorialDay,
+                 Holiday("Juneteenth", month=6, day=19, start_date="2022-01-01", observance=nearest_workday),
+                 Holiday("July4", month=7, day=4, observance=nearest_workday),
+                 USLaborDay, USThanksgivingDay,
+                 Holiday("Christmas", month=12, day=25, observance=nearest_workday)]
+    hols = _NYSE().holidays(pd.Timestamp(d0) - pd.Timedelta(days=5), pd.Timestamp(d1) + pd.Timedelta(days=5))
+    days = pd.bdate_range(d0, d1)
+    return [d for d in days if d not in set(hols)]
+
+def calendario_tau(hoy=None):
+    """Estado del ciclo intramensual: VENTANA (presion vendedora sobre losers), REBOTE
+    (mejor zona del mes para el cazador de suelos) o NEUTRO. Todo en sesiones NYSE."""
+    try:
+        hoy = pd.Timestamp(hoy or dt.date.today()).normalize()
+        ini_mes = hoy.replace(day=1)
+        fin_mes = (ini_mes + pd.offsets.MonthEnd(0))
+        ses = _nyse_bdays(ini_mes, fin_mes)
+        if not ses:
+            return None
+        tau = ses[-1]                                   # ultima sesion del mes
+        idx_tau = len(ses) - 1
+        # ventana [tau-8, tau-3] (6 sesiones, ajustada a T+1); rebote [tau-2 .. tau] + 3 primeras del mes siguiente
+        win = ses[max(0, idx_tau - 8): max(0, idx_tau - 2)]
+        reb_fin_mes = ses[max(0, idx_tau - 2):]
+        sig_ini = fin_mes + pd.Timedelta(days=1)
+        ses_sig = _nyse_bdays(sig_ini, sig_ini + pd.Timedelta(days=10))[:3]
+        rebote = reb_fin_mes + ses_sig
+        # los 3 PRIMEROS dias habiles del mes actual siguen siendo zona rebote del mes ANTERIOR
+        primeras3 = [d.normalize() for d in ses[:3]]
+        estado, col = "NEUTRO", "#8FA3C0"
+        if hoy in [d.normalize() for d in win]:
+            estado, col = "VENTANA ACTIVA", "#F4B740"
+        elif hoy in [d.normalize() for d in rebote] or hoy in primeras3:
+            estado, col = "ZONA REBOTE", "#2FD08A"
+        # si hoy no es sesion (finde/festivo), estado del proximo dia habil informativamente
+        _f = lambda d: d.strftime("%d %b")
+        # sesiones que faltan para que ARRANQUE la ventana (si aun no llego)
+        faltan_v = len([d for d in ses if hoy < d.normalize() <= win[0].normalize()]) if win and hoy < win[0] else 0
+        return {"estado": estado, "col": col, "tau": _f(tau),
+                "win_ini": _f(win[0]) if win else "?", "win_fin": _f(win[-1]) if win else "?",
+                "reb_ini": _f(rebote[0]) if rebote else "?", "reb_fin": _f(rebote[-1]) if rebote else "?",
+                "faltan_ventana": faltan_v,
+                "activa": estado == "VENTANA ACTIVA", "rebote": estado == "ZONA REBOTE"}
+    except Exception as e:
+        print(f"  calendario tau: {e}")
+        return None
+
+# ----------------------------------------------------------------------
+# MOTOR DE ANALOGOS (aprendizaje estadistico simple y AUDITABLE):
+# compara el estado actual del S&P con TODOS los dias desde 1990 usando k-vecinos
+# sobre rasgos normalizados (retornos 1m/3m/6m, distancia al maximo 52s, volatilidad,
+# pendiente de la MA200). Devuelve que paso DESPUES en los episodios mas parecidos.
+# Frecuencias historicas con intervalo de Wilson — NO una prediccion.
+# ----------------------------------------------------------------------
+def compute_analogos(close, desde="1990-01-01", k=50, sep=21):
+    try:
+        s = close.dropna()
+        s = s[s.index >= pd.Timestamp(desde)]
+        if len(s) < 800:
+            return None
+        r = s.pct_change()
+        f = pd.DataFrame(index=s.index)
+        f["r21"] = s.pct_change(21)
+        f["r63"] = s.pct_change(63)
+        f["r126"] = s.pct_change(126)
+        f["dd52"] = s / s.rolling(252, min_periods=60).max() - 1
+        f["vol21"] = r.rolling(21).std() * math.sqrt(252)
+        ma200 = s.rolling(200, min_periods=100).mean()
+        f["slope200"] = ma200.pct_change(20)
+        f = f.dropna()
+        if len(f) < 600:
+            return None
+        z = (f - f.mean()) / (f.std() + 1e-12)
+        hoy_v = z.iloc[-1].values
+        fwd21 = s.shift(-21) / s - 1
+        fwd63 = s.shift(-63) / s - 1
+        # candidatos: con futuro conocido y a >1 anyo de hoy (sin contaminar con el propio episodio)
+        cand = z.iloc[:-1]
+        mask = fwd63.reindex(cand.index).notna() & (cand.index < (s.index[-1] - pd.Timedelta(days=365)))
+        cand = cand[mask]
+        dist = ((cand - hoy_v) ** 2).sum(axis=1) ** 0.5
+        elegidos = []
+        for fecha in dist.sort_values().index:
+            if all(abs((fecha - e).days) > sep for e in elegidos):
+                elegidos.append(fecha)
+            if len(elegidos) >= k:
+                break
+        if len(elegidos) < 15:
+            return None
+        f21 = fwd21.reindex(elegidos).dropna() * 100
+        f63 = fwd63.reindex(elegidos).dropna() * 100
+        def _wil(p, n, zz=1.96):
+            den = 1 + zz * zz / n
+            ctr = (p + zz * zz / (2 * n)) / den
+            rad = zz * math.sqrt(max(p * (1 - p), 1e-9) / n + zz * zz / (4 * n * n)) / den
+            return int(round(100 * (ctr - rad))), int(round(100 * (ctr + rad)))
+        def _st(x):
+            n = len(x)
+            p = float((x > 0).mean()) if n else 0.0
+            lo, hi = _wil(p, n) if n else (0, 0)
+            return {"n": n, "pos": int(round(p * 100)), "lo": lo, "hi": hi,
+                    "med": round(float(x.median()), 1), "p5": round(float(x.quantile(.05)), 1),
+                    "p95": round(float(x.quantile(.95)), 1)}
+        top = [{"fecha": e.strftime("%b %Y"), "fwd63": round(float(fwd63.loc[e]) * 100, 1)}
+               for e in elegidos[:6] if e in fwd63.index and fwd63.loc[e] == fwd63.loc[e]]
+        est = f.iloc[-1]
+        return {"n": len(elegidos), "m1": _st(f21), "m3": _st(f63), "top": top,
+                "estado": {"r21": round(float(est["r21"]) * 100, 1), "r63": round(float(est["r63"]) * 100, 1),
+                           "dd52": round(float(est["dd52"]) * 100, 1), "vol21": round(float(est["vol21"]) * 100, 1)},
+                "desde": str(pd.Timestamp(desde).year)}
+    except Exception as e:
+        print(f"  analogos: {e}")
+        return None
 
 def fetch_fx():
     """EUR/USD avanzado para la cobertura divisa (Stooq -> Yahoo)."""
@@ -4238,7 +4672,7 @@ def _spark(vals, w=70, h=20, color=None, sw=1.4):
 
 
 def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred, flow=None, bt=None,
-               dd=None, dd_meta=None, plan=None, fx=None, long_src="", ai_text=None, leaders=None, leaders_n=0, bt2=None, heatmap=None, scores=None, probs=None, season=None, early=None, sector_breadth=None, meanrev=None, nq_close=None, fg_idx=None, spy_flow=None, watch=None, giro=None, desks=None, dix=None, suelo_pre=None, centinela=None, graduados=None, daily=None, ia_auto=None):
+               dd=None, dd_meta=None, plan=None, fx=None, long_src="", ai_text=None, leaders=None, leaders_n=0, bt2=None, heatmap=None, scores=None, probs=None, season=None, early=None, sector_breadth=None, meanrev=None, nq_close=None, fg_idx=None, spy_flow=None, watch=None, giro=None, desks=None, dix=None, suelo_pre=None, centinela=None, graduados=None, daily=None, ia_auto=None, tau=None, analogos=None, es_fut=None):
     rank = {"leading": 0, "weakening": 1, "improving": 2, "lagging": 3}
     ranked = sorted(rrg.items(), key=lambda kv: (rank[kv[1]["quad"]], -kv[1]["mom"]))
     last_date = df.index[-1].date()
@@ -4720,7 +5154,16 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                                f"<div style='font-size:11.5px;color:#9FB0C8'>{_lst} — castigados pero el dinero todavía sale. <b>Liquidez quieta, sin prisa.</b> "
                                "El suelo se caza cuando el flujo deja de salir, no cuando el precio está barato.</div></div>")
 
-            html.append("<div class='panel full'><h2>😴 DURMIENTES — suelo + silencio + giro, el radar de anticipación</h2>"
+            _tau_tag = ""
+            if tau and tau.get("activa"):
+                _tau_tag = (f"<div style='margin-bottom:6px;padding:5px 9px;background:rgba(244,183,64,.10);border:1px solid #F4B74055;"
+                            f"border-radius:6px;font-size:11px;color:#F4B740'>📅 VENTANA τ ACTIVA hasta {tau['win_fin']}: señal de suelo aquí = "
+                            f"reconfirmar tras la ventana (la caída puede ser venta forzada de fin de mes, no convicción).</div>")
+            elif tau and tau.get("rebote"):
+                _tau_tag = (f"<div style='margin-bottom:6px;padding:5px 9px;background:rgba(47,208,138,.10);border:1px solid #2FD08A55;"
+                            f"border-radius:6px;font-size:11px;color:#2FD08A'>📅 ZONA REBOTE τ hasta {tau['reb_fin']}: la mejor franja del mes "
+                            f"para un giro confirmado de suelo — la venta forzada terminó.</div>")
+            html.append("<div class='panel full'><h2>😴 DURMIENTES — suelo + silencio + giro, el radar de anticipación</h2>" + _tau_tag
                         + cazador +
                         "<div class='note'>La <b>base del sistema</b>: replicar el patrón que clavó el suelo de oro, Bitcoin y mineras. La secuencia completa es "
                         "<b>DORMIDO → 🧲 ACUMULACIÓN → 🌱 PRE-DESPERTAR → 🌅 DESPERTANDO</b>, y el dinero grande se gana entrando en el PRE-DESPERTAR, "
@@ -4796,9 +5239,25 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                                f"<span class='rk-pct'>desplegar {r['pct']}%</span>"
                                f"<span class='rk-veh'>{veh}</span>"
                                f"<span class='rk-st'>{stt}</span></div>")
-            left = (f"<div class='dd-now'><div class='lab'>Caida actual del {idx_name} desde maximos</div>"
+            _aviso_stale = ""
+            if plan.get("stale", 0) >= 1:
+                _aviso_stale = (f"<div style='margin:6px 0;padding:6px 9px;background:rgba(244,183,64,.12);border:1px solid #F4B74066;"
+                                f"border-radius:6px;font-size:11px;color:#F4B740'>⚠ El último dato es del <b>{plan.get('fecha','?')}</b> "
+                                f"(falta{'n' if plan['stale'] > 1 else ''} {plan['stale']} sesión(es)): la caída real puede ser MAYOR de la que ves aquí.</div>")
+            _es_line = ""
+            if es_fut:
+                try:
+                    _es_dd = (es_fut["last"] / plan["peak"] - 1) * 100
+                    _es_line = (f"<div class='sm' style='margin-top:3px'>Futuro ES (casi 24h): <b>{es_fut['last']}</b> "
+                                f"({_es_dd:+.1f}% vs ATH) · {es_fut['ts']} <span style='color:#5E708A'>— la referencia más fresca; "
+                                f"el contado siempre va por detrás</span></div>")
+                except Exception:
+                    pass
+            left = (f"<div class='dd-now'><div class='lab'>Caida actual del {idx_name} desde su MAXIMO INTRADIA</div>"
                     f"<div class='dd-big' style='color:{ddc}'>{plan['dd']:.1f}%</div>"
-                    f"<div class='sm'>Maximo {plan['peak']} · ahora {plan['last']} · fuente {long_src}</div></div>"
+                    f"<div class='sm'>ATH intradía <b>{plan['peak']}</b> · último cierre <b>{plan['last']}</b> ({plan.get('fecha','?')}) · fuente {long_src}"
+                    f"<span style='color:#5E708A'> · vs máx. de cierres: {plan.get('dd_close', plan['dd']):+.1f}%</span></div>"
+                    + _es_line + _aviso_stale + "</div>"
                     + rungs_html)
         right = ""
         if dd:
@@ -6335,6 +6794,118 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
     # ===== V3 — VISTA OPERATIVA (cerrar Contexto, abrir Operativa) =====
     html.append("</div><div id='vista-op' style='display:none'>")
 
+    # ===== SISTEMA DE DECISION (rediseño Operativa): menos es mas — decidir en 10 segundos =====
+    try:
+        _mi_syms = {t[0] for t in MI_CARTERA} if MI_CARTERA else set()
+        _fichas = compute_fichas(df, daily or {}, rrg, flow or {}, scores, suelo_pre, centinela, plan,
+                                 CARTERA_FINAL, _mi_syms, analogos=analogos, tau=tau)
+        # --- cabecera de contexto: mercado + analogos + tau, todo en una franja ---
+        ctx = []
+        if centinela:
+            ctx.append(f"<span style='color:{centinela['col']};font-weight:800'>{centinela['estado']}</span>")
+        if plan:
+            _dc = "#F4607A" if plan["dd"] <= -5 else "#F4B740" if plan["dd"] <= -2 else "#2FD08A"
+            ctx.append(f"S&P vs ATH <b style='color:{_dc}'>{plan['dd']:+.1f}%</b>")
+        if analogos:
+            _a3 = analogos["m3"]
+            ctx.append(f"análogos desde {analogos['desde']}: a 3 meses <b style='color:#5B8CFF'>{_a3['pos']}%</b> positivos "
+                       f"<span style='color:#5E708A'>(IC95 {_a3['lo']}–{_a3['hi']}, mediana {_a3['med']:+.1f}%, n={_a3['n']})</span>")
+        if tau:
+            ctx.append(f"ciclo τ: <b style='color:{tau['col']}'>{tau['estado']}</b>")
+        _lideres_t = [ff["sym"] for ff in (_fichas or []) if ff.get("lider_temp")][:5]
+        html.append("<div class='panel full' style='border-color:#5B8CFF55'>"
+                    "<h2>⚡ DECISIÓN — todo el terminal sintetizado en un ranking</h2>"
+                    "<div class='note'>Cada ficha recopila lo que ya calculan los demás paneles (RRG, flujo, suelos, centinela, plan, correlaciones) "
+                    "y lo convierte en un semáforo. Solo se muestra lo que cambia la decisión; el resto, plegado. "
+                    "Exposiciones gemelas (p.ej. SMH/SOXX) se agrupan y solo se recomienda el mejor candidato: una señal por movimiento, sin contradicciones. "
+                    "«Prob.» = frecuencia histórica del propio ETF en su cuadrante actual (adelante 4 semanas, IC 95%) — estadística, no predicción. No es asesoramiento.</div>"
+                    + ("<div style='font-size:12px;color:#B9C9E2;margin:6px 0 10px;padding:7px 10px;background:#0E1626;border-radius:8px'>"
+                       + " · ".join(ctx) + "</div>" if ctx else "")
+                    + (f"<div style='font-size:11.5px;color:#4CC2E0;margin-bottom:10px'>🌱 Síntomas tempranos de próximo líder "
+                       f"(aún débiles, RS acelerando + flujo girando): <b>{esc(', '.join(_lideres_t))}</b></div>" if _lideres_t else ""))
+        if _fichas:
+            _sm = _semaforo
+            cards = ""
+            for ff in _fichas[:10]:
+                c = ff["c"]
+                _pr = ff.get("prob")
+                _pr_t = (f"{_pr['p']}% <span style='color:#5E708A;font-size:9.5px'>(IC {_pr['lo']}–{_pr['hi']}, n={_pr['n']})</span>"
+                         if _pr else "<span style='color:#5E708A'>sin muestra</span>")
+                _gem = ""
+                if ff.get("gemelos"):
+                    _gem = ("<div style='font-size:10px;color:#8FA3C0;margin-top:4px'>≈ misma exposición: "
+                            + ", ".join(f"{g['sym']} ({g['score']})" for g in ff["gemelos"])
+                            + " — siguen la señal de este candidato</div>")
+                _fav = "".join(f"<div style='font-size:11px;color:#9FE3B9'>· {esc(x)}</div>" for x in ff["favor"]) or "<div style='font-size:11px;color:#5E708A'>· —</div>"
+                _con = "".join(f"<div style='font-size:11px;color:#F0A9B8'>· {esc(x)}</div>" for x in ff["contra"]) or "<div style='font-size:11px;color:#5E708A'>· nada relevante en contra</div>"
+                _tag = " <span style='font-size:9px;color:#5B8CFF'>EN CARTERA</span>" if ff["en_cart"] else ""
+                cards += (f"<div style='background:#0E1626;border:1px solid {ff['dcol']}44;border-left:3px solid {ff['dcol']};"
+                          f"border-radius:10px;padding:11px 14px;margin-bottom:8px'>"
+                          f"<div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px'>"
+                          f"<div style='font-size:15px'>{_sm(ff['score'])} <b style='color:#E6EDF6'>{ff['sym']}</b>"
+                          f" <span style='color:#8FA3C0;font-size:11px'>{esc(NAMES.get(ff['sym'], ('', '', ''))[0])}</span>{_tag}"
+                          f" — <b>Score {ff['score']}/100</b></div>"
+                          f"<div style='font-size:13px;font-weight:800;color:{ff['dcol']}'>{ff['direc']}</div></div>"
+                          f"<div style='font-size:11px;color:#B9C9E2;margin:6px 0;line-height:1.9'>"
+                          f"Mercado {_sm(c['mercado'])} · Sector {_sm(c['sector'])} <span style='color:#5E708A'>({esc(ff['sec_lbl'])})</span> · "
+                          f"Industria {_sm(c['industria'])} · ETF {_sm(c['etf'])} <span style='color:#5E708A'>({ff['quad']})</span> · "
+                          f"Flujo {_sm(c['flujo'])} <span style='color:#5E708A'>({ff['flu_lbl']})</span> · "
+                          f"Riesgo {_sm(c['riesgo'])} · Correlación {_sm(c['corr'])} · Prob. {_pr_t}</div>"
+                          f"<div style='display:flex;gap:18px;flex-wrap:wrap'>"
+                          f"<div style='flex:1;min-width:220px'><div style='font-size:9.5px;color:#8FA3C0;text-transform:uppercase'>A favor</div>{_fav}</div>"
+                          f"<div style='flex:1;min-width:220px'><div style='font-size:9.5px;color:#8FA3C0;text-transform:uppercase'>En contra</div>{_con}</div></div>"
+                          f"<div style='font-size:11px;color:#D7C9A8;margin-top:6px'><b>Conclusión:</b> {esc(ff['concl'])}</div>"
+                          + _gem
+                          + f"<details style='margin-top:5px'><summary style='cursor:pointer;font-size:10px;color:#5E708A'>detalle numérico</summary>"
+                            f"<div style='font-size:10.5px;color:#8FA3C0;margin-top:4px'>1 sem {ff['rel1']:+.1f}% rel · 4 sem {ff['rel4']:+.1f}% rel"
+                          + (f" · 13 sem {ff['abs13']:+.1f}% abs" if ff.get('abs13') is not None else "")
+                          + (f" · CMF {ff['cmf']:+.2f}" if ff.get('cmf') is not None else "")
+                          + (f" · {ff['hi52']}% del máx 52s" if ff.get('hi52') is not None else "")
+                          + f" · corr: {esc(ff['cor_lbl'])} · componentes: M{c['mercado']} S{c['sector']} I{c['industria']} E{c['etf']} F{c['flujo']} R{c['riesgo']} C{c['corr']}</div></details>"
+                          "</div>")
+            resto = _fichas[10:]
+            tabla_resto = ""
+            if resto:
+                filas = "".join(f"<tr><td style='padding:2px 8px'>{_sm(ff['score'])} <b>{ff['sym']}</b></td>"
+                                f"<td class='r' style='padding:2px 8px'>{ff['score']}</td>"
+                                f"<td style='padding:2px 8px;color:{ff['dcol']}'>{ff['direc']}</td>"
+                                f"<td style='padding:2px 8px;color:#8FA3C0;font-size:10px'>{ff['quad']} · flujo {ff['flu_lbl']}</td></tr>"
+                                for ff in resto)
+                tabla_resto = (f"<details style='margin-top:6px'><summary style='cursor:pointer;font-size:11px;color:#8FA3C0'>"
+                               f"ranking completo — {len(resto)} activos más</summary>"
+                               f"<table style='font-size:11.5px;border-collapse:collapse;margin-top:5px'>{filas}</table></details>")
+            html.append(cards + tabla_resto)
+        else:
+            html.append("<div class='note'>No se pudieron generar las fichas esta semana.</div>")
+        html.append("</div>")
+        # --- CALENDARIO tau (informativo) ---
+        if tau:
+            _reglas = ("<div style='font-size:11px;color:#B9C9E2;line-height:1.8'>"
+                       "· Dentro de la ventana: <b>no comprar suelos ni promediar débiles</b> — la venta sobre losers es mecánica (liquidez de fin de mes), el CMF ahí es ambiguo.<br>"
+                       "· Si el lunes de ejecución cae dentro de la ventana Y el activo es un loser (rezagado, caída fuerte): <b>aplazar al primer lunes fuera</b>. Winners no se aplazan.<br>"
+                       f"· Mejor zona del mes para el cazador de suelos: <b style='color:#2FD08A'>{tau['reb_ini']} → {tau['reb_fin']}</b> (la presión terminó, rebote de losers favorable).<br>"
+                       "· Apalancados 3x/5x sobre sectores débiles: su mayor riesgo mensual es justo la ventana — vigilar margen XTB.</div>")
+            html.append(f"<div class='panel full' style='border-color:{tau['col']}55'>"
+                        f"<h2>📅 CALENDARIO τ — ciclo intramensual de momentum</h2>"
+                        f"<div style='display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px'>"
+                        f"<div style='font-size:20px;font-weight:800;color:{tau['col']}'>{tau['estado']}</div>"
+                        f"<div style='font-size:11.5px;color:#8FA3C0'>ventana de presión: <b>{tau['win_ini']} → {tau['win_fin']}</b> · "
+                        f"τ (última sesión del mes): <b>{tau['tau']}</b>"
+                        + (f" · faltan {tau['faltan_ventana']} sesiones para la ventana" if tau.get('faltan_ventana') else "") + "</div></div>"
+                        + _reglas +
+                        "<div class='note' style='margin-top:6px'>Base: Nathan, Suominen &amp; Tasa (jun 2026) — el momentum en EE.UU. se concentra en 6 sesiones que acaban 4 días antes de fin de mes, "
+                        "por venta forzada de LOSERS para liquidez de fin de mes; el efecto viene del decil perdedor, no de los winners. Ajustado a T+1: ventana [τ−8, τ−3]. "
+                        "Es un overlay informativo sobre tu ritmo viernes→lunes, no un sistema. <b>Invalidación:</b> registrar 6 meses el retorno de posiciones-loser dentro vs fuera de ventana; "
+                        "si dentro no es sistemáticamente peor, retirar el overlay. Anomalía publicada: puede decaer.</div></div>")
+        # --- todo lo clasico de Operativa queda debajo, plegado por defecto (nada se elimina) ---
+        html.append("<details style='margin:4px 0 10px'><summary style='cursor:pointer;font-size:13px;color:#8FA3C0;"
+                    "padding:8px 12px;background:#0E1626;border:1px solid #24344F;border-radius:8px'>"
+                    "🔧 Detalle completo — todos los paneles clásicos de Operativa (mesa, candidatos, sintético, apalancados…)</summary>")
+        _op_details_abierto = True
+    except Exception as _e_dec:
+        print(f"  panel decision: {_e_dec}")
+        _op_details_abierto = False
+
     # ===== MESA DE OPERACIONES: todo lo accionable de la semana en una pantalla =====
     try:
         _box = lambda titulo, cuerpo, bcol="#24344F": (f"<div style='flex:1 1 300px;min-width:280px;background:#0E1626;border:1px solid {bcol};"
@@ -6762,6 +7333,8 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
         html.append(op)
     except Exception:
         pass
+    if _op_details_abierto:
+        html.append("</details>")
     html.append("</div>")
 
     # ===== V-PRO — TERMINAL PRO (estetica de terminal profesional: negro, ambar, monoespaciada, densa) =====
@@ -7315,22 +7888,39 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                     continue
                 _p2, _wk2b = _res
                 _rec = _rec_entrada(_s2)
-                _spyp, _qqqp = None, None
+                _spyp, _qqqp, _audit = None, None, ""
+                # fecha FINAL comun = la ultima fecha del propio ETF: los tres retornos se cierran EN ESE DIA.
+                # (antes QQQ se cerraba en la ultima fecha de la serie Stooq del Nasdaq, que suele ir 1 sesion
+                # por detras -> en semanas malas del Nasdaq la columna QQQ salia demasiado alta: ventanas distintas)
+                try:
+                    _fecha_fin = df[_s2].dropna().index[-1]
+                except Exception:
+                    _fecha_fin = None
                 if _rec is not None and _rec.get("date"):
                     _fecha_e = _rec.get("date")
                     _pxg = _rec.get("px", {}) or {}
-                    # SPY: primero el precio GRABADO ese mismo dia (misma base que el ETF); si falta, por fecha
                     _spy_e = _pxg.get("SPY") or _precio_en_fecha(df["SPY"] if "SPY" in df.columns else None, _fecha_e)
-                    if _spy_e and _spy_e > 0 and "SPY" in df.columns:
-                        _spyp = (float(df["SPY"].dropna().iloc[-1]) / float(_spy_e) - 1) * 100
-                    # QQQ no se graba en el ledger (no esta en el universo): por fecha sobre la serie larga del Nasdaq
+                    if _spy_e and _spy_e > 0 and "SPY" in df.columns and _fecha_fin is not None:
+                        _spy_f = _precio_en_fecha(df["SPY"], _fecha_fin) or float(df["SPY"].dropna().iloc[-1])
+                        _spyp = (_spy_f / float(_spy_e) - 1) * 100
                     _qqq_e = _precio_en_fecha(_qqq_serie, _fecha_e)
-                    if _qqq_e and _qqq_e > 0 and _qqq_serie is not None:
-                        _qn = _qqq_serie.dropna()
-                        _qqqp = (float(_qn.iloc[-1]) / float(_qqq_e) - 1) * 100 if len(_qn) else None
+                    _qqq_f = _precio_en_fecha(_qqq_serie, _fecha_fin) if _fecha_fin is not None else None
+                    if _qqq_e and _qqq_e > 0 and _qqq_f:
+                        _qqqp = (_qqq_f / _qqq_e - 1) * 100
+                    # AUTO-AUDITORIA: recalcular el % del ETF por FECHAS puras sobre la serie re-descargada;
+                    # si difiere >3pp del calculo por ledger, marcar la fila (huecos o precio mal grabado).
+                    try:
+                        _etf_e_chk = _precio_en_fecha(df[_s2], _fecha_e)
+                        if _etf_e_chk and _etf_e_chk > 0:
+                            _p_chk = (_px_now / _etf_e_chk - 1) * 100
+                            if abs(_p_chk - _p2) > 3.0:
+                                _audit = (f" <span title='ledger {_p2:+.1f}% vs por-fechas {_p_chk:+.1f}%: revisar precio grabado' "
+                                          f"style='color:#F4B740;font-size:10px'>⚠</span>")
+                    except Exception:
+                        pass
                 _nuevo = (_rec is None)
                 _wk_lbl = ("<span style='color:#4CC2E0;font-size:9px'>nueva</span>" if _nuevo
-                           else f"<span style='color:#8FA3C0;font-size:9px'>{_wk2b}s</span>")
+                           else f"<span style='color:#8FA3C0;font-size:9px'>{_wk2b}s</span>") + _audit
                 _win = (_p2 - _spyp) if (_spyp is not None) else None
                 _wcol = "#5E708A" if _win is None else ("#2FD08A" if _win >= 0 else "#F4607A")
                 _dRows += (f"<tr><td style='text-align:left;padding:3px 6px'><b style='color:#5B8CFF'>{_s2}</b> {_wk_lbl}</td>"
@@ -7348,7 +7938,8 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                             + _dRows + "</table>"
                             "<div style='font-size:9px;color:#7A8CA8;margin-top:4px'>⚖ Esta tabla muestra las posiciones ACTUALES desde su entrada (los que siguen vivos), "
                             "con los <b>mismos precios grabados en el ledger</b> que la columna «desde entrada» de la Cartera de la semana — un solo número para la misma pregunta. "
-                            "SPY y QQQ se miden desde la fecha real de ese registro (misma ventana). «nueva» = entró esta semana (aún 0%). "
+                            "SPY y QQQ se miden desde la fecha real de ese registro y se CIERRAN en la misma fecha final que el ETF (ventana idéntica en los dos extremos). "
+                            "⚠ = el % del ledger difiere >3pp del recálculo por fechas: precio grabado sospechoso, revisar. «nueva» = entró esta semana (aún 0%). "
                             "El track record de arriba encadena la cesta completa semana a semana, incluidos los que salieron: por eso puede ser peor que la media de esta tabla. "
                             "Ambos son correctos; miden preguntas distintas.</div></div>")
         except Exception:
@@ -7783,18 +8374,25 @@ def main():
     bt = backtest(df, rrg, hold=("leading", "improving")) if BACKTEST else None
     bt2 = backtest(df, rrg, hold=("leading", "improving", "weakening")) if BACKTEST else None
     long_close, long_src, long_hl = fetch_long_close()
+    # FIX caida-desde-ATH: Stooq llega con retraso -> se refresca con Yahoo (^GSPC) y el pico usa Highs intradia
+    long_close, long_hl = refrescar_con_yahoo(long_close, long_hl, "^GSPC")
+    es_fut = fetch_es_futuro()
+    tau = calendario_tau()
+    analogos = compute_analogos(long_close) if long_close is not None else None
     dd, dd_meta = (drawdown_stats(long_close, DD_THRESHOLDS, hl=long_hl) if long_close is not None else (None, None))
-    plan = cash_plan(long_close) if long_close is not None else None
+    plan = cash_plan(long_close, hl=long_hl) if long_close is not None else None
     season = {}
     sp_se = compute_seasonality(long_close) if long_close is not None else None
     if sp_se:
         season["S&P 500"] = sp_se
     print("  Estacionalidad: descargando Nasdaq y Russell (historico largo)...")
     nq_close, _, _ = _fetch_long("^ndx", "QQQ", "^NDX")
+    nq_close, _ = refrescar_con_yahoo(nq_close, None, "^NDX")
     nq_se = compute_seasonality(nq_close) if nq_close is not None else None
     if nq_se:
         season["Nasdaq 100"] = nq_se
     rut_close, _, _ = _fetch_long("^rut", "IWM", "^RUT")
+    rut_close, _ = refrescar_con_yahoo(rut_close, None, "^RUT")
     rut_se = compute_seasonality(rut_close) if rut_close is not None else None
     if rut_se:
         season["Russell 2000"] = rut_se
@@ -7911,7 +8509,7 @@ def main():
             print("\nAviso enviado.")
 
     html = build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred, flow=flow, bt=bt,
-                      dd=dd, dd_meta=dd_meta, plan=plan, fx=fx, long_src=long_src, ai_text=ai_text, leaders=leaders, leaders_n=leaders_n, bt2=bt2, heatmap=heatmap, scores=scores, probs=probs, season=season, early=early, sector_breadth=sector_breadth, meanrev=meanrev, nq_close=nq_close, fg_idx=fg_idx, spy_flow=spy_flow, watch=watch, giro=_giro, desks=_desks, dix=_dix, suelo_pre=_suelo, centinela=_centinela, graduados=_graduados, daily=daily, ia_auto=ia_auto)
+                      dd=dd, dd_meta=dd_meta, plan=plan, fx=fx, long_src=long_src, ai_text=ai_text, leaders=leaders, leaders_n=leaders_n, bt2=bt2, heatmap=heatmap, scores=scores, probs=probs, season=season, early=early, sector_breadth=sector_breadth, meanrev=meanrev, nq_close=nq_close, fg_idx=fg_idx, spy_flow=spy_flow, watch=watch, giro=_giro, desks=_desks, dix=_dix, suelo_pre=_suelo, centinela=_centinela, graduados=_graduados, daily=daily, ia_auto=ia_auto, tau=tau, analogos=analogos, es_fut=es_fut)
     os.makedirs(SITE_DIR, exist_ok=True)
     # copiar archivos estaticos (iconos, manifest, service worker) al sitio
     if os.path.isdir(STATIC_DIR):
