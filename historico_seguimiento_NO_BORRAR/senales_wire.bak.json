@@ -337,12 +337,6 @@
 },
 {
 "date": "2026-07-17",
-"tag": "SUELO",
-"sym": "XLB",
-"dir": 0
-},
-{
-"date": "2026-07-17",
 "tag": "EARLY",
 "sym": "GDX",
 "dir": 1
