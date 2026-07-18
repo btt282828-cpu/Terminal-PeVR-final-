@@ -140,8 +140,9 @@ FLUJO_NOCTURNO_MIN = 2.0         # gap acumulado de 20 sesiones (en %) a partir 
 #     tema dominante esta DEBILITANDOSE/REZAGADO en el mercado US, se avisa (no se veta: tu decides).
 #     Mapa: ETF -> (tema legible, [ETFs-US espejo de ese tema]). Solo para internacionales/tematicos. ---
 COHERENCIA_TEMA = {
-    "EWY":  ("semiconductores", ["SMH", "SOXX"]),          # Corea = Samsung + SK Hynix
+    "EWY":  ("semiconductores", ["SMH", "SOXX"]),          # Corea = Samsung + SK Hynix (chivato de semis)
     "EWT":  ("semiconductores", ["SMH", "SOXX"]),          # Taiwan = TSMC (por si se anade)
+    "EEM":  ("semis + China", ["SMH", "SOXX", "KWEB"]),    # Emergentes = TSMC + Tencent + Samsung: NO es apuesta EM pura, es semis+China disfrazada
     "INDA": ("tecnología", ["XLK", "IGV"]),                # India = mucho IT services
     "KWEB": ("tecnología china", ["XLK"]),
     "FXI":  ("financiero/China", ["XLF"]),
@@ -1830,6 +1831,90 @@ def heatmap_color(v):
     return f"background:rgba(244,96,122,{0.12 + 0.78*(-x):.2f});color:#1A0608"
 
 
+def _px_en_fecha(serie, fecha):
+    """Precio en la primera sesion >= fecha (busqueda por fecha en una serie)."""
+    try:
+        s = serie.dropna()
+        idx = s.index.searchsorted(pd.Timestamp(fecha))
+        if idx >= len(s):
+            idx = len(s) - 1
+        return float(s.iloc[idx])
+    except Exception:
+        return None
+
+# ----------------------------------------------------------------------
+# HISTORIAL COMPLETO DE EPISODIOS: cada entrada->salida que el sistema ha dado,
+# PERDIDAS INCLUIDAS. Un episodio = racha de semanas consecutivas dentro de la cesta.
+# Entrada = precio grabado el viernes de entrada; salida = precio grabado el viernes
+# en que el sistema lo saco (o valoracion actual si sigue abierto). El acumulado
+# encadena TODOS los episodios del ETF (compuesto), sin borrar los malos: la
+# transparencia de los fallos es parte del producto (el edge es evitar perdidas,
+# y eso solo se demuestra ensenando tambien las que no se evitaron).
+# ----------------------------------------------------------------------
+def episodios_cartera(recs, df=None, cur_week=None):
+    try:
+        rows = sorted([r for r in (recs or []) if r.get("week")], key=lambda r: r.get("week", ""))
+        if len(rows) < 2:
+            return None
+        todos = sorted({s for r in rows for s in r.get("basket", [])})
+        out = []
+        for s in todos:
+            eps, dentro, ent_px, ent_wk, ent_spy = [], False, None, None, None
+            for r in rows:
+                en_cesta = s in r.get("basket", [])
+                px = (r.get("px", {}) or {}).get(s)
+                spy = (r.get("px", {}) or {}).get("SPY")
+                if en_cesta and not dentro:
+                    dentro, ent_px, ent_wk, ent_spy = True, px, r.get("week"), spy
+                elif not en_cesta and dentro:
+                    # salida: el viernes en que YA NO esta. Precio de salida = px grabado ese viernes
+                    # (el ledger graba todo el universo); si falta, por fecha en df.
+                    sal_px = px
+                    if (sal_px is None or sal_px != sal_px) and df is not None and s in df.columns and r.get("date"):
+                        sal_px = _px_en_fecha(df[s], r.get("date"))
+                    ret = ((sal_px / ent_px - 1) * 100) if (ent_px and sal_px) else None
+                    rspy = ((spy / ent_spy - 1) * 100) if (ent_spy and spy) else None
+                    eps.append({"in": ent_wk, "out": r.get("week"), "ret": ret, "spy": rspy, "abierto": False})
+                    dentro, ent_px, ent_wk, ent_spy = False, None, None, None
+            if dentro:
+                # episodio abierto: valorar al ultimo dato disponible
+                ult = rows[-1]
+                sal_px = (ult.get("px", {}) or {}).get(s)
+                spy_f = (ult.get("px", {}) or {}).get("SPY")
+                if (sal_px is None) and df is not None and s in df.columns:
+                    try:
+                        sal_px = float(df[s].dropna().iloc[-1])
+                    except Exception:
+                        sal_px = None
+                ret = ((sal_px / ent_px - 1) * 100) if (ent_px and sal_px) else None
+                rspy = ((spy_f / ent_spy - 1) * 100) if (ent_spy and spy_f) else None
+                eps.append({"in": ent_wk, "out": None, "ret": ret, "spy": rspy, "abierto": True})
+            eps_val = [e for e in eps if e["ret"] is not None]
+            if not eps_val:
+                continue
+            acum = 1.0
+            for e in eps_val:
+                acum *= (1 + e["ret"] / 100)
+            acum = (acum - 1) * 100
+            acum_spy = 1.0
+            spy_ok = all(e["spy"] is not None for e in eps_val)
+            if spy_ok:
+                for e in eps_val:
+                    acum_spy *= (1 + e["spy"] / 100)
+                acum_spy = (acum_spy - 1) * 100
+            else:
+                acum_spy = None
+            out.append({"sym": s, "eps": eps, "n": len(eps_val),
+                        "gan": sum(1 for e in eps_val if e["ret"] > 0),
+                        "acum": round(acum, 1),
+                        "acum_spy": (round(acum_spy, 1) if acum_spy is not None else None),
+                        "abierto": any(e["abierto"] for e in eps)})
+        out.sort(key=lambda x: -x["acum"])
+        return out or None
+    except Exception as e:
+        print(f"  episodios: {e}")
+        return None
+
 # ----------------------------------------------------------------------
 # FICHAS DE DECISION (pestana Operativa rediseñada): recopila TODO lo que ya
 # calcula el terminal (RRG, flujo, scores, suelos, centinela, plan, correlaciones)
@@ -1844,17 +1929,18 @@ PADRE_SECTOR = {"SMH": "XLK", "SOXX": "XLK", "IGV": "XLK", "SKYY": "XLK", "CIBR"
                 "GRID": "XLU", "PAVE": "XLI", "XME": "XLB", "GDX": "XLB", "SIL": "XLB", "SLV": "XLB",
                 "MOO": "XLB", "FIW": "XLU", "CGW": "XLU",
                 "KWEB": "XLK", "FXI": "XLF", "EWJ": "XLF", "INDA": "XLK", "EWZ": "XLB",
-                "VGK": "XLF", "EWY": "XLK", "IBIT": None}
+                "VGK": "XLF", "EWY": "XLK", "EWG": "XLI", "EWP": "XLF", "MAGS": "XLK", "IBIT": None}
 GEMELOS_FIJOS = [("SMH", "SOXX"), ("XLE", "XOP", "OIH"), ("TAN", "ICLN", "FAN"),
                  ("GDX", "SIL"), ("KWEB", "FXI"), ("ARKK", "ARKF"), ("FIW", "CGW")]
 
 def _semaforo(v):
     return "🟢" if v >= 65 else ("🟡" if v >= 45 else "🔴")
 
-def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen, mi_syms, analogos=None, tau=None):
+def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen, mi_syms, analogos=None, tau=None, desks=None):
     try:
         score_by = {r["sym"]: r for r in (scores or [])}
         suelo_by = {r["sym"]: r for r in (suelo or [])}
+        poker_by = {d["sym"]: d for d in (desks or []) if d and d.get("sym")}
         universo = [s for s in (SECTORS + THEMATIC + EXTRA) if s in rrg and s in df.columns]
         rets_w = df.pct_change().iloc[-26:]                       # 26 semanas para correlaciones
         # --- contexto de mercado (igual para todos) ---
@@ -1940,8 +2026,46 @@ def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen,
                     cor_lbl = f"max {cmax:.2f} con {cwho}" if cwho else "libre"
             except Exception:
                 pass
-            # score global ponderado
+            # score global ponderado (0-100): ETF y flujo son el núcleo; sector, mercado, riesgo y correlación modulan
             score = int(round(c_etf * .25 + c_flu * .25 + c_sec * .15 + mkt * .15 + c_rie * .10 + c_cor * .10))
+            # --- FILTRO DE COHERENCIA: un ETF internacional NO puede salir fuerte si su tema espejo US está débil.
+            #     EEM/EWY/INDA son semis+China disfrazados: cuando SMH/KWEB sangran, ellos sangran (lección Samsung jul-2026).
+            #     Veto duro: si el espejo está en Debilitándose/Rezagado -> nunca COMPRAR, solo ESPERAR, y se penaliza el score. ---
+            veto_coh, coh_txt = False, ""
+            _coh = COHERENCIA_TEMA.get(s)
+            if _coh:
+                tema, espejos = _coh
+                quads_esp = [rrg[e]["quad"] for e in espejos if e in rrg]
+                if quads_esp:
+                    espejos_vivos = [e for e in espejos if e in rrg]
+                    debiles = [e for e, q in zip(espejos_vivos, quads_esp) if q in ("weakening", "lagging")]
+                    # semis (SMH/SOXX) tienen peso dominante en EEM/EWY: con UNO débil basta.
+                    # Para el resto, se exige mayoría de los espejos débiles.
+                    semis_debil = any(e in ("SMH", "SOXX") for e in debiles)
+                    umbral = 1 if semis_debil else (len(quads_esp) // 2 + (len(quads_esp) % 2))
+                    if len(debiles) >= max(1, umbral):
+                        veto_coh = True
+                        _pen = 14 if len(debiles) == len(quads_esp) else 9
+                        score = max(3, score - _pen)
+                        c_sec = min(c_sec, 38)          # su "sector" hereda la debilidad del tema real
+                        coh_txt = f"tema {tema} débil en EE.UU. ({'/'.join(debiles)} {'/'.join(set(q for q in quads_esp if q in ('weakening','lagging')))}): la fuerza local no es fiable"
+            # --- JETS: NO es solapamiento con un sector US. Su motor real es crudo (coste) + dólar + ciclo de viajes.
+            #     Regla propia: crudo al alza (XOP/OIH fuertes) o dólar fuerte = viento en contra estructural. ---
+            jets_txt = ""
+            if s == "JETS":
+                crudo_fuerte = any(rrg.get(x, {}).get("quad") in ("leading", "improving") for x in ("XOP", "OIH"))
+                dolar_fuerte = False
+                try:
+                    if "UUP" in df.columns:
+                        _uu = df["UUP"].dropna()
+                        dolar_fuerte = float(_uu.iloc[-1] / _uu.iloc[-min(5, len(_uu) - 1) - 1] - 1) > 0.01
+                except Exception:
+                    pass
+                if crudo_fuerte or dolar_fuerte:
+                    _mot = " + ".join([m for m, ok in [("crudo subiendo (coste de combustible)", crudo_fuerte),
+                                                       ("dólar fuerte", dolar_fuerte)] if ok])
+                    c_rie = max(3, c_rie - 12)
+                    jets_txt = f"viento en contra estructural: {_mot}"
             # prob. exito 4 semanas: frecuencia historica del propio ETF en el MISMO cuadrante + mismo signo de flujo
             prob = None
             try:
@@ -1966,6 +2090,8 @@ def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen,
             es_suelo = bool(su and su["pts"] >= 8 and not su.get("sangra"))
             if en_cart and (distrib or (quad == "lagging" and g["pquad"] == "weakening") or score < 38):
                 direc, dcol = "VENDER", "#F4607A"
+            elif veto_coh:
+                direc, dcol = "ESPERAR", "#F4B740"          # veto duro: el tema espejo US manda, no la fuerza local
             elif score >= 68 and c_flu >= 50 and mkt >= 45 and quad in ("leading", "improving") and not distrib:
                 direc, dcol = "COMPRAR", "#2FD08A"
             elif es_suelo and c_flu >= 40:
@@ -1973,7 +2099,7 @@ def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen,
             else:
                 direc, dcol = "ESPERAR", "#F4B740"
             # proximo lider temprano
-            lider_temp = (quad in ("improving",) or (quad == "lagging" and g["dmom"] > 0.5)) and \
+            lider_temp = (not veto_coh) and (quad in ("improving",) or (quad == "lagging" and g["dmom"] > 0.5)) and \
                          g["ratio"] < 100 and (f.get("cmf_mejora") or (cmf is not None and cmf > 0))
             # motivos a favor / en contra (max 5 / 3)
             favor, contra = [], []
@@ -1992,6 +2118,8 @@ def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen,
             if c_cor <= 30: contra.append(f"duplica exposición ya abierta ({cor_lbl})")
             if c_sec <= 35: contra.append(f"su sector padre está débil ({sec_lbl})")
             if tau and tau.get("activa") and quad == "lagging": contra.append("ventana τ activa: presión vendedora mecánica sobre losers hasta " + tau["win_fin"])
+            if coh_txt: contra.insert(0, "🌐 " + coh_txt)     # el más importante para internacionales: va primero
+            if jets_txt: contra.insert(0, "✈ " + jets_txt)
             if mkt <= 35: contra.append("el mercado está en distribución: bajar tamaño")
             if prob and prob["n"] < 15: contra.append(f"muestra corta (n={prob['n']}): confianza baja")
             # conclusion con invalidacion (falsable)
@@ -2010,7 +2138,8 @@ def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen,
                            "sec_lbl": sec_lbl, "hi52": (round(hi52) if hi52 is not None else None),
                            "rel1": g.get("rel1"), "rel4": g.get("rel4"), "abs13": sc.get("abs_mom"),
                            "prob": prob, "favor": favor[:5], "contra": contra[:3], "concl": concl,
-                           "en_cart": en_cart, "suelo": es_suelo, "lider_temp": lider_temp})
+                           "en_cart": en_cart, "suelo": es_suelo, "lider_temp": lider_temp,
+                           "poker": (poker_by.get(s, {}).get("pts") if s in poker_by else None)})
         # --- deduplicacion: gemelos fijos + correlacion semanal > .92 -> un solo representante ---
         grupo_de = {}
         for gpo in GEMELOS_FIJOS:
@@ -2039,6 +2168,10 @@ def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen,
                 jefe = dict(jefe)
                 jefe["gemelos"] = [{"sym": m["sym"], "score": m["score"], "direc": m["direc"]} for m in miembros[1:]]
                 # coherencia: los gemelos heredan la senal del mejor (una sola recomendacion por exposicion)
+                # ...y el jefe hereda la mesa de poker del grupo (el desk puede apuntar al gemelo, p.ej. SMH bajo SOXX)
+                _pk = [m.get("poker") for m in miembros if m.get("poker") is not None]
+                if _pk:
+                    jefe["poker"] = max(_pk)
             finales.append(jefe)
         finales.sort(key=lambda x: -x["score"])
         return finales
@@ -6798,7 +6931,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
     try:
         _mi_syms = {t[0] for t in MI_CARTERA} if MI_CARTERA else set()
         _fichas = compute_fichas(df, daily or {}, rrg, flow or {}, scores, suelo_pre, centinela, plan,
-                                 CARTERA_FINAL, _mi_syms, analogos=analogos, tau=tau)
+                                 CARTERA_FINAL, _mi_syms, analogos=analogos, tau=tau, desks=desks)
         # --- cabecera de contexto: mercado + analogos + tau, todo en una franja ---
         ctx = []
         if centinela:
@@ -6813,6 +6946,56 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
         if tau:
             ctx.append(f"ciclo τ: <b style='color:{tau['col']}'>{tau['estado']}</b>")
         _lideres_t = [ff["sym"] for ff in (_fichas or []) if ff.get("lider_temp")][:5]
+        # --- CONFLUENCIA DE REBOTE: ideas tacticas rapidas (SEPARADAS de la cartera de rotacion) ---
+        # Candados: (1) etiqueta tactica explicita; (2) vehiculo CONTADO por defecto, apalancado solo
+        # como mencion con stop; (3) si el Centinela esta en DISTRIBUCION CONFIRMADA, el bloque se
+        # bloquea entero: comprar rebote apalancado en distribucion es la trampa clasica.
+        _confl_html = ""
+        try:
+            _dist_conf = bool(centinela and centinela.get("estado") == "DISTRIBUCION" and centinela.get("confirmado"))
+            _ideas = []
+            _poker_hi = {d["sym"]: d for d in (desks or []) if d and d.get("pts", 0) >= 7}
+            for _sym, _dk in _poker_hi.items():
+                _fk = (flow or {}).get(_sym, {})
+                _flujo_gira = bool(_fk.get("cmf_mejora") or (_fk.get("cmf") is not None and _fk["cmf"] > -0.05))
+                if _flujo_gira:
+                    _cfgd = next((c for c in DESKS_POKER if c["id"] == _dk.get("id")), {})
+                    _ideas.append({"tit": f"{_sym} rebote {_dk['pts']}/10",
+                                   "det": " · ".join(_dk.get("det", [])[:3]),
+                                   "veh": f"{_sym} en CONTADO, tamaño ¼-Kelly del desk",
+                                   "lev": _cfgd.get("veh", "")})
+            # la confluencia que pediste: XLK con flujo girando + SEMIS >= 7 -> rebote Nasdaq
+            _dk_semis = next((d for d in (desks or []) if d and d.get("id") == "SEMIS"), None)
+            _fx_xlk = (flow or {}).get("XLK", {})
+            _xlk_gira = bool(_fx_xlk.get("cmf_mejora") or (_fx_xlk.get("cmf") is not None and _fx_xlk["cmf"] > 0))
+            _xlk_no_div = _fx_xlk.get("diverg") != "distribucion oculta"
+            if _dk_semis and _dk_semis.get("pts", 0) >= 7 and _xlk_gira and _xlk_no_div:
+                _ideas.insert(0, {"tit": f"NASDAQ rebote por confluencia (XLK flujo girando + semis {_dk_semis['pts']}/10)",
+                                  "det": "primer giro de flujo en XLK con semis en zona de rebote estadístico",
+                                  "veh": "QQQ en CONTADO",
+                                  "lev": "TQQQ (3x) SOLO con confirmación de 3 sesiones de flujo (un círculo verde = 1 día = ruido), tamaño mínimo, stop obligatorio — su decay diario cobra si el rebote se retrasa"})
+            if _dist_conf:
+                _confl_html = ("<div style='margin:6px 0 10px;padding:8px 11px;background:rgba(244,96,122,.07);border:1px solid #F4607A44;"
+                               "border-radius:8px;font-size:11.5px;color:#F0A9B8'>💡 CONFLUENCIA DE REBOTE — 🔒 <b>BLOQUEADO</b>: "
+                               "Centinela en DISTRIBUCIÓN confirmada. En este régimen el rebote comprado (y más con apalancado) es la trampa "
+                               "estadística clásica: la sobreventa puede seguir sobrevendida. Las ideas tácticas vuelven cuando el régimen cambie.</div>")
+            elif _ideas:
+                _its = ""
+                for _i in _ideas[:3]:
+                    _its += (f"<div style='margin:5px 0;padding:7px 10px;background:#0E1626;border-left:3px solid #4CC2E0;border-radius:7px'>"
+                             f"<div style='font-size:12px;color:#4CC2E0'><b>💡 {esc(_i['tit'])}</b> "
+                             f"<span style='font-size:9px;color:#F4B740;border:1px solid #F4B74055;border-radius:4px;padding:1px 5px'>TÁCTICO — NO ROTACIÓN</span></div>"
+                             f"<div style='font-size:10.5px;color:#8FA3C0;margin-top:2px'>{esc(_i['det'])}</div>"
+                             f"<div style='font-size:10.5px;color:#B9C9E2;margin-top:2px'>Vehículo: <b>{esc(_i['veh'])}</b></div>"
+                             + (f"<div style='font-size:10px;color:#7A8CA8;margin-top:1px'>Apalancado: {_i['lev']}</div>" if _i.get("lev") else "")
+                             + "</div>")
+                _confl_html = ("<div style='margin:6px 0 10px'>"
+                               "<div style='font-size:10.5px;color:#8FA3C0;text-transform:uppercase;letter-spacing:.8px'>💡 Confluencia de rebote — ideas tácticas (aparte de la cartera)</div>"
+                               + _its +
+                               "<div style='font-size:9.5px;color:#5E708A;margin-top:3px'>Regla: idea táctica = mesa de póker ≥7/10 + flujo girando. Se juega aparte de la rotación, "
+                               "en contado, tamaño pequeño, stop sagrado. Si el Centinela pasa a distribución confirmada, este bloque se bloquea solo.</div></div>")
+        except Exception:
+            _confl_html = ""
         html.append("<div class='panel full' style='border-color:#5B8CFF55'>"
                     "<h2>⚡ DECISIÓN — todo el terminal sintetizado en un ranking</h2>"
                     "<div class='note'>Cada ficha recopila lo que ya calculan los demás paneles (RRG, flujo, suelos, centinela, plan, correlaciones) "
@@ -6822,7 +7005,8 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                     + ("<div style='font-size:12px;color:#B9C9E2;margin:6px 0 10px;padding:7px 10px;background:#0E1626;border-radius:8px'>"
                        + " · ".join(ctx) + "</div>" if ctx else "")
                     + (f"<div style='font-size:11.5px;color:#4CC2E0;margin-bottom:10px'>🌱 Síntomas tempranos de próximo líder "
-                       f"(aún débiles, RS acelerando + flujo girando): <b>{esc(', '.join(_lideres_t))}</b></div>" if _lideres_t else ""))
+                       f"(aún débiles, RS acelerando + flujo girando): <b>{esc(', '.join(_lideres_t))}</b></div>" if _lideres_t else "")
+                    + _confl_html)
         if _fichas:
             _sm = _semaforo
             cards = ""
@@ -6839,6 +7023,9 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                 _fav = "".join(f"<div style='font-size:11px;color:#9FE3B9'>· {esc(x)}</div>" for x in ff["favor"]) or "<div style='font-size:11px;color:#5E708A'>· —</div>"
                 _con = "".join(f"<div style='font-size:11px;color:#F0A9B8'>· {esc(x)}</div>" for x in ff["contra"]) or "<div style='font-size:11px;color:#5E708A'>· nada relevante en contra</div>"
                 _tag = " <span style='font-size:9px;color:#5B8CFF'>EN CARTERA</span>" if ff["en_cart"] else ""
+                if ff.get("poker") is not None and ff["poker"] >= 6:
+                    _tag += (f" <span style='font-size:9px;color:#F4B740;border:1px solid #F4B74055;border-radius:4px;padding:1px 5px'>"
+                             f"🎰 {ff['poker']}/10 rebote — táctico, no rotación</span>")
                 cards += (f"<div style='background:#0E1626;border:1px solid {ff['dcol']}44;border-left:3px solid {ff['dcol']};"
                           f"border-radius:10px;padding:11px 14px;margin-bottom:8px'>"
                           f"<div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px'>"
@@ -8002,6 +8189,51 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                     "<div class='note' style='margin-top:8px;color:#5E708A'>Ritual de publicación del sábado: 1) genera el terminal con el cierre del viernes → "
                     "2) descarga tarjeta + PDF → 3) tarjeta a X/Telegram por la mañana, PDF a Substack → 4) mismo formato cada semana: la constancia ES el producto. "
                     "Recuerda el marco: análisis público NO personalizado, con posiciones propias declaradas.</div></div>")
+        # --- HISTORIAL COMPLETO: todas las entradas que el sistema ha dado, episodio a episodio, PERDIDAS INCLUIDAS ---
+        try:
+            _eps = episodios_cartera(_recs_e, df=df, cur_week=_cur_week)
+            if _eps:
+                _hRows = ""
+                for _e in _eps:
+                    _det_ep = ""
+                    for _ep in _e["eps"]:
+                        if _ep["ret"] is None:
+                            continue
+                        _rc = "#2FD08A" if _ep["ret"] >= 0 else "#F4607A"
+                        _fin = "abierta" if _ep["abierto"] else (_ep["out"] or "?")
+                        _det_ep += (f"<span style='display:inline-block;margin:1px 4px 1px 0;padding:1px 6px;background:#0A1220;"
+                                    f"border:1px solid {_rc}44;border-radius:4px;font-size:9.5px;color:{_rc}'>"
+                                    f"{_ep['in']}→{_fin} <b>{_ep['ret']:+.1f}%</b></span>")
+                    _ac = _e["acum"]
+                    _acc = "#2FD08A" if _ac >= 0 else "#F4607A"
+                    _vs = None
+                    if _e["acum_spy"] is not None:
+                        _vs = _ac - _e["acum_spy"]
+                    _vsc = "#5E708A" if _vs is None else ("#2FD08A" if _vs >= 0 else "#F4607A")
+                    _ab = " <span style='font-size:8.5px;color:#4CC2E0'>(abierta)</span>" if _e["abierto"] else ""
+                    _spy_txt = (f"{_e['acum_spy']:+.1f}%" if _e["acum_spy"] is not None else "—")
+                    _hRows += (f"<tr><td style='text-align:left;padding:3px 6px;vertical-align:top'><b style='color:#5B8CFF'>{_e['sym']}</b>{_ab}"
+                               f"<div style='font-size:8.5px;color:#8FA3C0'>{_e['gan']}/{_e['n']} ganadores</div></td>"
+                               f"<td style='text-align:left;padding:3px 6px'>{_det_ep}</td>"
+                               f"<td style='text-align:right;padding:3px 6px;color:{_acc};font-weight:800'>{_ac:+.1f}%</td>"
+                               f"<td style='text-align:right;padding:3px 6px;color:#8FA3C0'>{_spy_txt}</td>"
+                               f"<td style='text-align:right;padding:3px 6px;color:{_vsc};font-weight:700'>{(f'{_vs:+.1f}' if _vs is not None else '—')}</td></tr>")
+                _n_perd = sum(1 for _e in _eps if _e["acum"] < 0)
+                html.append("<div class='panel full' style='border-color:#5B8CFF33'>"
+                            "<h2>📜 HISTORIAL COMPLETO DEL SISTEMA — todas las entradas, pérdidas incluidas</h2>"
+                            "<div class='note'>Cada chip es un episodio real entrada→salida grabado en el ledger (viernes a viernes). "
+                            "El ACUMULADO encadena todos los episodios del ETF, ganadores y perdedores — nada se borra: "
+                            f"{_n_perd} de {len(_eps)} ETFs van en negativo acumulado y ahí se quedan, a la vista. "
+                            "La transparencia del fallo es parte del producto: el edge de este sistema es reducir drawdown, y eso solo es creíble enseñando también lo que salió mal.</div>"
+                            "<table style='width:100%;border-collapse:collapse;font-size:11.5px'>"
+                            "<tr style='color:#8FA3C0;font-size:9.5px'><th style='text-align:left;padding:3px 6px'>ETF</th>"
+                            "<th style='text-align:left;padding:3px 6px'>episodios (entrada→salida)</th>"
+                            "<th style='text-align:right;padding:3px 6px'>ACUMULADO</th>"
+                            "<th style='text-align:right;padding:3px 6px'>SPY mismos periodos</th>"
+                            "<th style='text-align:right;padding:3px 6px'>vs SPY</th></tr>"
+                            + _hRows + "</table></div>")
+        except Exception as _e_hist:
+            print(f"  historial episodios: {_e_hist}")
     except Exception:
         del html[_rds_mark:]
         html.append("<div class='panel full'><h2>📣 Redes</h2><div class='note'>La tarjeta no se pudo generar esta semana.</div></div>")
