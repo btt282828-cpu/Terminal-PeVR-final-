@@ -1935,6 +1935,8 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                 c_otm = calls.iloc[(calls["strike"] - spot * 1.05).abs().argsort()[:1]]
                 if len(p_otm) and len(c_otm):
                     skew = float(p_otm["impliedVolatility"].iloc[0] - c_otm["impliedVolatility"].iloc[0])
+                    if abs(skew) > 0.18:      # >18 ptos de vol entre put y call 5% OTM = cadena rota, no señal
+                        skew = None
             except Exception:
                 pass
             if iliq:
@@ -1976,7 +1978,7 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
             continue
         proxy_lbl = None
         # --- ETF iliquido con proxy definido: promediar sus acciones grandes ---
-        if m["iliquido"] and s in OPCIONES_PROXY:
+        if (m["iliquido"] or m.get("pcr_vol") is None) and s in OPCIONES_PROXY:
             hijos = []
             for tkr in OPCIONES_PROXY[s]:
                 h = _analiza(tkr)
@@ -2021,6 +2023,38 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                   "mp_dist": (round(m["mp_dist"], 1) if m.get("mp_dist") is not None else None),
                   "spot": (round(m["spot"], 2) if m.get("spot") else None), "cmf": cmf,
                   "diverg": diverg, "iliquido": m["iliquido"], "proxy": proxy_lbl}
+    # --- IV RANK REAL: se guarda la IV de cada ETF en cada ejecucion (historico propio) y, con >=10
+    #     observaciones, se calcula el rank contra SU historia. El "IV pct" contra vol realizada sale
+    #     inflado siempre (el seguro cotiza con prima de riesgo por naturaleza); el rank propio no. ---
+    try:
+        os.makedirs(SEGUIMIENTO_DIR, exist_ok=True)
+        _ivf = os.path.join(SEGUIMIENTO_DIR, "options_iv.json")
+        _hist = {}
+        if os.path.exists(_ivf):
+            try:
+                _hist = json.load(open(_ivf, encoding="utf-8"))
+            except Exception:
+                _hist = {}
+        _hoyk = str(dt.date.today())
+        for s, o in out.items():
+            if o.get("iv") is None:
+                continue
+            serie = _hist.setdefault(s, {})
+            serie[_hoyk] = o["iv"]
+            if len(serie) > 250:
+                for k in sorted(serie)[:len(serie) - 250]:
+                    serie.pop(k, None)
+            vals = [v for k, v in serie.items() if k != _hoyk]
+            if len(vals) >= 10:
+                o["iv_rank"] = int(round(100 * sum(1 for v in vals if v <= o["iv"]) / len(vals)))
+        try:
+            _tmp = _ivf + ".tmp"
+            json.dump(_hist, open(_tmp, "w", encoding="utf-8"))
+            os.replace(_tmp, _ivf)
+        except Exception:
+            pass
+    except Exception as _e_iv:
+        print(f"  iv rank: {_e_iv}")
     return out or None
 
 def explicar_opciones(options, flow=None, rrg=None, cartera=None):
@@ -2057,9 +2091,15 @@ def explicar_opciones(options, flow=None, rrg=None, cartera=None):
                 frases.append(f"Casi nadie compra seguro (solo {pcr:.1f} por apuesta alcista): CONFIANZA, a veces exceso de ella.")
             else:
                 frases.append("Los seguros y las apuestas alcistas están equilibrados: sin señal fuerte por aquí.")
-        if ivp is not None:
-            if ivp >= 80:
-                frases.append("El seguro está CARÍSIMO comparado con lo normal: el mercado espera un movimiento fuerte pronto (mira News: suele haber un catalizador con fecha).")
+        if o.get("iv_rank") is not None:
+            if o["iv_rank"] >= 85:
+                frases.append(f"El seguro está más caro que el {o['iv_rank']}% de los últimos meses: esperan movimiento fuerte pronto (mira News: suele haber un catalizador con fecha).")
+            elif o["iv_rank"] <= 15:
+                frases.append("El seguro está más barato que de costumbre: nadie espera sustos a corto plazo.")
+        elif ivp is not None:
+            # aproximacion IV-vs-movimiento-real: el seguro SIEMPRE cotiza con prima, asi que solo los extremos dicen algo
+            if ivp >= 97:
+                frases.append("El seguro está caro incluso para lo habitual (y el seguro casi siempre cuesta más que el movimiento real): esperan algo gordo.")
             elif ivp <= 20:
                 frases.append("El seguro está barato: nadie espera sustos a corto plazo.")
         if sk is not None and sk > 6:
@@ -7964,7 +8004,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
             for _s, _o in _ordit:
                 _pcr = _o.get("pcr_vol")
                 _pcc = RED if (_pcr and _pcr > 1.3) else (GRN if (_pcr and _pcr < 0.7) else GRY)
-                _ivp = _o.get("iv_pct")
+                _ivp = _o.get("iv_rank") if _o.get("iv_rank") is not None else _o.get("iv_pct")
                 _ivpc = RED if (_ivp is not None and _ivp >= 80) else (GRN if (_ivp is not None and _ivp <= 20) else GRY)
                 _sk = _o.get("skew")
                 _skc = RED if (_sk is not None and _sk > 6) else (CYN if (_sk is not None and _sk < 0) else GRY)
@@ -7985,7 +8025,9 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                        f"<td style='font-size:10px'>{_dvtxt}</td></tr>")
             od += ("</table><div style='font-size:10px;color:#666;margin-top:4px'>"
                    "Opciones de Yahoo (gratis). P/C&gt;1.3 = miedo/protección (rojo); &lt;0.7 = codicia (verde). "
-                   "IV pct = % del tiempo que la vol realizada estuvo por debajo de la IV actual (alto = catalizador caro, cruza con News). "
+                   "IV pct = rank contra su PROPIA historia de IV cuando hay &ge;10 registros guardados (options_iv.json); mientras se llena, aproximación vs vol realizada — "
+                   "ojo: el seguro casi SIEMPRE cotiza con prima sobre el movimiento real, así que en modo aproximado solo los extremos (&ge;97) significan algo. "
+                   "Si ejecutas en fin de semana, el volumen de opciones es el del viernes y puede venir parcial: fíate más del P/C OI que del P/C vol. "
                    "skew&gt;6 = pagan por protección a la baja. max pain = imán de precio al vencimiento (útil el 3er viernes). "
                    "⚠ = DIVERGENCIA con el CMF: el flujo dice una cosa y las opciones otra — tu confirmación por segunda vía. "
                    "Liquidez fiable solo en ETFs USA; sirven de señal aunque operes los UCITS.</div>")
