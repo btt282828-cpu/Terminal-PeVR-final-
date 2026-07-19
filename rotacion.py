@@ -23,6 +23,67 @@ OPCIONAL (macro mas rico): pon tu key gratuita de FRED abajo en CONFIG.
 """
 
 import sys, subprocess, importlib, os, json, math, time, webbrowser, datetime as dt
+import logging
+from logging.handlers import RotatingFileHandler
+
+# ======================================================================
+# SALUD DEL BUILD — cambio 1 de la revision senior: los fallos de CALCULO
+# nunca mas seran silenciosos. Todo aviso queda en tres sitios a la vez:
+#   1) consola (como siempre),
+#   2) rotacion.log rotatorio junto al script (5 archivos x 1MB, auto-.gitignore),
+#   3) el panel "SALUD DEL BUILD" del propio terminal (pestana PRO).
+# Filosofia intacta: el build NUNCA se rompe; pero ahora deja rastro de
+# todo lo que degrado, para que un numero raro no pase por bueno.
+# ======================================================================
+SALUD_BUILD = []          # [(origen, mensaje)] acumulado durante la ejecucion
+_SALUD_MAX = 120          # tope duro para no inflar memoria/HTML
+
+def _setup_log():
+    lg = logging.getLogger("rotacion")
+    if lg.handlers:
+        return lg
+    lg.setLevel(logging.INFO)
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        base = "."
+    ruta = os.path.join(base, "rotacion.log")
+    try:
+        fh = RotatingFileHandler(ruta, maxBytes=1_000_000, backupCount=5, encoding="utf-8")
+        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        lg.addHandler(fh)
+        # el log no debe acabar en GitHub: auto-.gitignore (mismo patron que las API keys)
+        if os.path.isdir(os.path.join(base, ".git")):
+            gi = os.path.join(base, ".gitignore")
+            try:
+                cont = open(gi, "r", encoding="utf-8").read() if os.path.exists(gi) else ""
+                if "rotacion.log" not in cont:
+                    with open(gi, "a", encoding="utf-8") as f:
+                        f.write(("" if (not cont or cont.endswith(chr(10))) else chr(10)) + "rotacion.log*" + chr(10))
+            except Exception:
+                pass
+    except Exception:
+        pass                                              # sin permiso de escritura: consola y panel siguen funcionando
+    return lg
+
+_LOG = _setup_log()
+
+def _avisar(origen, msg, nivel="warning"):
+    """Registra una degradacion de datos/calculo en consola + log + panel de salud.
+    origen: nombre corto de la funcion/fuente ('options.XLB', 'refresco_yahoo', ...).
+    Los avisos identicos se agrupan (contador) para no inundar con 40 repeticiones."""
+    try:
+        m = str(msg)[:180]
+        getattr(_LOG, nivel, _LOG.warning)("[%s] %s", origen, m)
+        print(f"  ⚠ [{origen}] {m}")
+        for i, (o, t, n) in enumerate(SALUD_BUILD):
+            if o == origen and t == m:
+                SALUD_BUILD[i] = (o, t, n + 1)
+                return
+        if len(SALUD_BUILD) < _SALUD_MAX:
+            SALUD_BUILD.append((origen, m, 1))
+    except Exception:
+        pass                                              # el sistema de avisos jamas puede tumbar el build
 
 # ----------------------------------------------------------------------
 # CONFIG  (lo unico que quizas quieras tocar)
@@ -1962,7 +2023,8 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                     maxpain, mp_dist = None, None
             return {"exp": exp0, "pcr_vol": pcr_vol, "pcr_oi": pcr_oi, "iv": iv_atm, "skew": skew,
                     "maxpain": maxpain, "mp_dist": mp_dist, "spot": spot, "iliquido": iliq}
-        except Exception:
+        except Exception as e:
+            _avisar(f"options.{tkr}", f"cadena de opciones no analizada: {type(e).__name__}: {e}")
             return None
 
     out = {}
@@ -2054,7 +2116,7 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
         except Exception:
             pass
     except Exception as _e_iv:
-        print(f"  iv rank: {_e_iv}")
+        _avisar("options.iv_rank", f"historial de IV no persistido (el IV pct usara la aproximacion): {_e_iv}")
     return out or None
 
 def _vd_card(v):
@@ -2295,7 +2357,7 @@ def episodios_cartera(recs, df=None, cur_week=None):
         out.sort(key=lambda x: -x["acum"])
         return out or None
     except Exception as e:
-        print(f"  episodios: {e}")
+        _avisar("episodios", f"historial de episodios no calculado: {e}")
         return None
 
 # ----------------------------------------------------------------------
@@ -2582,7 +2644,7 @@ def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen,
         finales.sort(key=lambda x: -x["score"])
         return finales
     except Exception as e:
-        print(f"  fichas de decision: {e}")
+        _avisar("fichas", f"SISTEMA DE FICHAS caído — Operativa y Veredicto sin panel de decisión: {e}", nivel="error")
         return None
 
 # ----------------------------------------------------------------------
@@ -2931,8 +2993,7 @@ def refrescar_con_yahoo(close, hl, ysym):
         if len(nuevos):
             _ratio = float(nuevos.iloc[0]) / float(base.iloc[-1])
             if not (0.8 <= _ratio <= 1.25):
-                print(f"  [{ysym}] refresco DESCARTADO: escala incompatible con la serie base "
-                      f"(ratio {_ratio:.2f}) — se mantiene la serie original sin mezclar")
+                _avisar(f"refresco.{ysym}", f"refresco DESCARTADO: escala incompatible (ratio {_ratio:.2f}); la serie sigue sin mezclar y el drawdown puede ir 1 sesion viejo")
                 nuevos = nuevos.iloc[0:0]
         if len(nuevos):
             base = pd.concat([base, nuevos])
@@ -3046,7 +3107,7 @@ def calendario_tau(hoy=None):
                 "activa": estado == "VENTANA ACTIVA", "transicion": estado == "TRANSICIÓN",
                 "rebote": estado == "ZONA REBOTE"}
     except Exception as e:
-        print(f"  calendario tau: {e}")
+        _avisar("tau", f"calendario τ no calculado (el overlay desaparece este build): {e}")
         return None
 
 # ----------------------------------------------------------------------
@@ -3113,7 +3174,7 @@ def compute_analogos(close, desde="1990-01-01", k=50, sep=21):
                            "dd52": round(float(est["dd52"]) * 100, 1), "vol21": round(float(est["vol21"]) * 100, 1)},
                 "desde": str(pd.Timestamp(desde).year)}
     except Exception as e:
-        print(f"  analogos: {e}")
+        _avisar("analogos", f"motor de análogos no calculado: {e}")
         return None
 
 def fetch_fx():
@@ -8089,6 +8150,24 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                     fm += "<td></td><td></td><td></td><td></td>"
             fm += "</tr>"
         fm += "</table><div style='font-size:10px;color:#666;margin-top:4px'>CMF 20s · umbral ±0.05 · DIV! = distribución oculta (precio sube, dinero sale)</div>"
+        # --- SALUD DEL BUILD: todo lo que se degrado en esta ejecucion, a la vista (cambio 1 de la revision) ---
+        try:
+            if SALUD_BUILD:
+                _sb = ("<table><tr style='color:#888;font-size:10px'><td>origen</td><td>aviso</td><td>veces</td></tr>")
+                for _o, _t, _n in SALUD_BUILD[:40]:
+                    _sb += (f"<tr><td style='color:{AMB};white-space:nowrap'>{esc(_o)}</td>"
+                            f"<td style='color:#B9C9E2'>{esc(_t)}</td>"
+                            f"<td style='color:{GRY}'>{('×' + str(_n)) if _n > 1 else ''}</td></tr>")
+                _sb += ("</table><div style='font-size:10px;color:#666;margin-top:4px'>"
+                        "Cada fila es un dato que NO llegó o se descartó por sospechoso. El terminal siguió funcionando, "
+                        "pero estos huecos explican paneles ausentes o marcados. Detalle completo en rotacion.log junto al script. "
+                        "Un build limpio no muestra este panel.</div>")
+                html.append(_mod(f"🩺 SALUD DEL BUILD — {len(SALUD_BUILD)} AVISOS (LO QUE SE DEGRADÓ Y POR QUÉ)", _sb))
+            else:
+                html.append(_mod("🩺 SALUD DEL BUILD — LIMPIO",
+                                 "<div style='color:" + GRN + ";font-size:12px'>✓ Sin incidencias: todas las fuentes respondieron y ningún dato fue descartado por los filtros de cordura.</div>"))
+        except Exception:
+            pass
         html.append(_mod("FLOW MONITOR — DÓNDE ENTRA Y SALE EL DINERO", fm))
         # --- MODULO OPTIONS DESK: put/call, IV percentil, skew, max pain y DIVERGENCIA con el CMF ---
         if options:
@@ -8715,7 +8794,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                             "<th style='text-align:right;padding:3px 6px'>vs SPY</th></tr>"
                             + _hRows + "</table></div>")
         except Exception as _e_hist:
-            print(f"  historial episodios: {_e_hist}")
+            _avisar("render.historial", f"panel no renderizado: {_e_hist}")
     except Exception:
         del html[_rds_mark:]
         html.append("<div class='panel full'><h2>📣 Redes</h2><div class='note'>La tarjeta no se pudo generar esta semana.</div></div>")
@@ -8822,7 +8901,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                            "Cartera primero, luego los avisos. No es asesoramiento.</div>"
                            + _bloq + "</div>")
         except Exception as _e_exp:
-            print(f"  opciones en cristiano: {_e_exp}")
+            _avisar("render.cristiano", f"panel no renderizado: {_e_exp}")
         # --- PANEL DE IA AUTOMATICA: la respuesta del maestro, generada EN ESTE BUILD ---
         try:
             if ia_auto:
@@ -8944,7 +9023,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
             html.append("<div class='panel full'><h2>⚖️ VEREDICTO</h2><div class='note'>Se genera con las fichas de Operativa; ejecuta con datos para verlo.</div></div>")
         html.append("</div>")
     except Exception as _e_vd:
-        print(f"  vista veredicto: {_e_vd}")
+        _avisar("render.veredicto", f"panel no renderizado: {_e_vd}")
         html.append("<div id='vista-vd' style='display:none'></div>")
 
     # ===== V-NEWS — solo noticias/catalizadores CON FECHA que mueven las posiciones =====
@@ -8997,7 +9076,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                     "amplifica el giro de fin de mes en las dos direcciones.</div></div>")
         html.append("</div>")
     except Exception as _e_news:
-        print(f"  vista news: {_e_news}")
+        _avisar("render.news", f"panel no renderizado: {_e_news}")
         html.append("<div id='vista-news' style='display:none'></div>")
 
     # ---- RESUMEN SEMANAL DESCARGABLE (PDF imprimible / JPG para redes) ----
@@ -9218,10 +9297,17 @@ def main():
     _ysym_ref = "SPY" if "spy" in str(long_src).lower() else "^GSPC"
     long_close, long_hl = refrescar_con_yahoo(long_close, long_hl, _ysym_ref)
     es_fut = fetch_es_futuro()
+    if not es_fut:
+        _avisar("es_futuro", "futuro ES no disponible: la referencia casi-24h no se muestra este build", nivel="info")
     _uni_opt = [s for s in (SECTORS + THEMATIC + EXTRA) if s in df.columns]
     print("  OPTIONS DESK: descargando cadenas de opciones de Yahoo ...")
     options = compute_options(_uni_opt, flow=flow, daily=daily)
-    print(f"  OPTIONS DESK: {len(options) if options else 0} ETFs con datos de opciones")
+    _n_opt = len(options) if options else 0
+    print(f"  OPTIONS DESK: {_n_opt} ETFs con datos de opciones")
+    if _n_opt == 0:
+        _avisar("options", "OPTIONS DESK vacío: Yahoo no devolvió ninguna cadena (¿rate limit / sin conexión?); paneles de opciones ausentes este build")
+    elif _n_opt < max(5, len(_uni_opt) // 3):
+        _avisar("options", f"OPTIONS DESK parcial: solo {_n_opt}/{len(_uni_opt)} ETFs con cadena — posible rate limit de Yahoo a mitad de descarga")
     tau = calendario_tau()
     analogos = compute_analogos(long_close) if long_close is not None else None
     dd, dd_meta = (drawdown_stats(long_close, DD_THRESHOLDS, hl=long_hl) if long_close is not None else (None, None))
@@ -9392,6 +9478,15 @@ def main():
     with open(out, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"\nPanel generado: {out}")
+    # --- resumen de salud del build (tambien queda en rotacion.log) ---
+    if SALUD_BUILD:
+        print(f"\n  🩺 SALUD DEL BUILD: {len(SALUD_BUILD)} avisos — detalle en la pestaña PRO y en rotacion.log")
+        for _o, _t, _n in SALUD_BUILD[:10]:
+            print(f"     · [{_o}] {_t}" + (f" (×{_n})" if _n > 1 else ""))
+        if len(SALUD_BUILD) > 10:
+            print(f"     · ... y {len(SALUD_BUILD) - 10} más")
+    else:
+        print("\n  🩺 SALUD DEL BUILD: limpio — sin datos degradados ni descartados")
     if scores:
         print("\n  PUNTUACION (de mayor a menor) — entra en 4-5/5, vende <=2/5:")
         for r in scores[:12]:
