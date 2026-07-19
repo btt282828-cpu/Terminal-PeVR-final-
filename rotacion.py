@@ -247,11 +247,16 @@ SECTOR_STOCKS = {
 FRED_API_KEY = ""                                # DEJAR VACIO: la key va en los Secrets de GitHub (FRED_API_KEY), NO aqui (repo publico)
 ISM_MANUAL = 54.0                                # ISM manufacturas (no esta limpio en FRED gratis): actualizalo a mano el 1er dia habil de cada mes. Ult.: 54.0 (mayo-2026)
 # --- Analisis con IA (opcional): comentario automatico en el panel ---
+# --- EVENTOS PUNTUALES con fecha (editable): se pintan en la pestaña News. Formato ("YYYY-MM-DD", "texto") ---
+EVENTOS_MERCADO = [
+    ("2026-07-27", "Kimi K3 (Moonshot): publicación de PESOS ABIERTOS — hasta hoy todo benchmark es autoinformado; verificación independiente desde esta fecha. Confirma → presión extra en SMH/SOXX/EEM/EWY e IBIT; decepciona → rally de alivio en semis justo al cierre de la ventana τ"),
+]
+
 ANTHROPIC_API_KEY = ""                           # opcional: https://console.anthropic.com (de pago por uso)
 AI_MODEL = "claude-haiku-4-5"                    # modelo del comentario corto (editable segun tu cuenta)
 # --- IA AUTOMATICA en Modo Claude: al ejecutar el terminal, se lanza el prompt MAESTRO con tus datos ---
 IA_AUTO = True                                   # ejecutar automaticamente el prompt maestro en cada build (si hay API key)
-IA_AUTO_EXTRA = ["sectorial","flujos","liderazgo","ocultas","ciclo","insiders","narrativas","multifactor"]  # TODOS los prompts se auto-ejecutan (deja [] para solo el maestro; cada uno suma tiempo y coste)
+IA_AUTO_EXTRA = ["news","sectorial","flujos","liderazgo","ocultas","ciclo","insiders","narrativas","multifactor"]  # TODOS los prompts se auto-ejecutan (deja [] para solo el maestro; cada uno suma tiempo y coste)
 IA_AUTO_MODEL = "claude-sonnet-4-6"              # modelo del analisis largo. Alternativas: "claude-opus-4-6" (mejor y mas caro), "claude-haiku-4-5" (mas barato)
 IA_WEB_SEARCH = True                             # permitir a la IA buscar en la web (13F, VIX, earnings...); suma coste por busqueda
 IA_MAX_TOKENS = 2000                             # longitud maxima de cada respuesta
@@ -265,6 +270,14 @@ IA_COMPAT_MODEL = "gemini-2.0-flash"                                          # 
 IA_COMPAT_KEY = ""                               # key del proveedor compatible (o variable de entorno IA_COMPAT_KEY)
 # --- Biblioteca de prompts (los 9 de Pedro): el maestro se auto-ejecuta; el resto, copiables o via IA_AUTO_EXTRA ---
 IA_PROMPTS = [
+    ("news", "📰 News — solo lo que mueve TUS posiciones",
+     "Eres el filtro de noticias de un inversor de rotacion sectorial. Busca en la web SOLO los 6-8 catalizadores CON FECHA "
+     "de las proximas 2 semanas que puedan mover de verdad este universo: semiconductores (SMH/SOXX), biotech (XBI), banca regional (KRE), "
+     "financieras (XLF), retail (XRT), salud (XLV), energia (XLE/XOP), oro y mineras (GLD/GDX), bitcoin (IBIT), China/emergentes (KWEB/FXI/EEM), "
+     "Alemania (EWG/DAX). Incluye: FOMC y datos macro clave, resultados de empresas que arrastran a esos ETFs (megacaps, semis, bancos regionales, "
+     "mineras grandes), decisiones regulatorias o geopoliticas con fecha. Para CADA una: fecha exacta, que es, que ETF(s) toca y en que direccion, "
+     "y el escenario que la invalidaria. PROHIBIDO: opiniones de analistas, price targets, rumores sin fecha, noticias ya cotizadas. "
+     "Ordena por fecha. Cierra con una linea: LA NOTICIA MAS PELIGROSA DE LA SEMANA y por que."),
     ("sectorial", "🕰 Rotación sectorial — 30 años de precursores",
      "Analiza los últimos 30 años y encuentra qué indicadores (tipos de interés, inflación, ISM, PMI, curva de tipos, desempleo, beneficios empresariales, dólar y petróleo) han anticipado las rotaciones entre tecnología, financieras, industriales, energía, consumo, salud y utilities."),
     ("flujos", "💸 Flujos institucionales",
@@ -1842,6 +1855,181 @@ def _px_en_fecha(serie, fecha):
     except Exception:
         return None
 
+def compute_options(symbols, flow=None, daily=None, max_syms=40):
+    """OPTIONS DESK — descarga cadenas de opciones de Yahoo (gratis, misma fuente) y calcula por ETF:
+    put/call ratio (volumen y OI), IV media y su PERCENTIL historico aproximado, skew (IV puts OTM vs calls OTM),
+    y max pain del vencimiento mas cercano. Lo valioso: DIVERGENCIA con el CMF (dinero entra por flujo pero
+    compran proteccion en opciones = distribucion oculta confirmada por otra via). Best-effort, nunca rompe el build.
+    Las opciones liquidas estan en ETFs USA; sirven de SEÑAL aunque Pedro opere sus equivalentes UCITS."""
+    if yf is None:
+        return None
+    out = {}
+    hoy = pd.Timestamp.today().normalize()
+    flow = flow or {}
+    for i, s in enumerate(symbols[:max_syms]):
+        try:
+            tk = yf.Ticker(s)
+            exps = tk.options
+            if not exps:
+                continue
+            # vencimiento mas cercano a >=5 dias (evita el ruido del 0DTE) y el mensual siguiente
+            futuras = [e for e in exps if pd.Timestamp(e) >= hoy]
+            if not futuras:
+                continue
+            exp0 = next((e for e in futuras if (pd.Timestamp(e) - hoy).days >= 5), futuras[0])
+            ch = tk.option_chain(exp0)
+            calls, puts = ch.calls, ch.puts
+            if calls is None or puts is None or not len(calls) or not len(puts):
+                continue
+            cvol, pvol = float(calls["volume"].fillna(0).sum()), float(puts["volume"].fillna(0).sum())
+            coi, poi = float(calls["openInterest"].fillna(0).sum()), float(puts["openInterest"].fillna(0).sum())
+            pcr_vol = (pvol / cvol) if cvol > 0 else None
+            pcr_oi = (poi / coi) if coi > 0 else None
+            # spot
+            spot = None
+            try:
+                if daily and s in daily and daily[s] is not None:
+                    spot = float(daily[s]["Close"].dropna().iloc[-1])
+            except Exception:
+                pass
+            if spot is None:
+                try:
+                    spot = float(tk.fast_info["lastPrice"])
+                except Exception:
+                    spot = float(calls["strike"].median())
+            # IV ATM (media de la IV de los 4 strikes mas cercanos al spot en cada lado)
+            def _iv_near(dfo):
+                d = dfo.dropna(subset=["impliedVolatility"]).copy()
+                if not len(d):
+                    return None
+                d["dist"] = (d["strike"] - spot).abs()
+                return float(d.nsmallest(4, "dist")["impliedVolatility"].mean())
+            iv_c, iv_p = _iv_near(calls), _iv_near(puts)
+            iv_atm = None
+            if iv_c is not None and iv_p is not None:
+                iv_atm = (iv_c + iv_p) / 2
+            elif iv_c is not None:
+                iv_atm = iv_c
+            elif iv_p is not None:
+                iv_atm = iv_p
+            # SKEW: IV de puts ~5% OTM menos IV de calls ~5% OTM (positivo = pagan por proteccion a la baja)
+            skew = None
+            try:
+                p_otm = puts.iloc[(puts["strike"] - spot * 0.95).abs().argsort()[:1]]
+                c_otm = calls.iloc[(calls["strike"] - spot * 1.05).abs().argsort()[:1]]
+                if len(p_otm) and len(c_otm):
+                    skew = float(p_otm["impliedVolatility"].iloc[0] - c_otm["impliedVolatility"].iloc[0])
+            except Exception:
+                pass
+            # IV percentil aproximado: comparamos la IV ATM contra la vol realizada historica del subyacente
+            iv_pct = None
+            try:
+                if daily and s in daily and daily[s] is not None and iv_atm is not None:
+                    rc = daily[s]["Close"].pct_change().dropna()
+                    if len(rc) > 120:
+                        rv = rc.rolling(21).std() * (252 ** 0.5)          # vol realizada 21d anualizada
+                        rv = rv.dropna()
+                        if len(rv) > 60:
+                            iv_pct = int(round(100 * float((rv < iv_atm).mean())))   # % del tiempo que la RV estuvo por debajo de la IV actual
+            except Exception:
+                pass
+            # MAX PAIN: strike que minimiza el valor intrinseco total de calls+puts en circulacion
+            maxpain = None
+            try:
+                strikes = sorted(set(calls["strike"]).union(set(puts["strike"])))
+                coi_by = calls.set_index("strike")["openInterest"].fillna(0)
+                poi_by = puts.set_index("strike")["openInterest"].fillna(0)
+                best, bestval = None, None
+                for K in strikes:
+                    dolor = sum(float(coi_by.get(k, 0)) * max(K - k, 0) for k in strikes) + \
+                            sum(float(poi_by.get(k, 0)) * max(k - K, 0) for k in strikes)
+                    if bestval is None or dolor < bestval:
+                        best, bestval = K, dolor
+                maxpain = best
+            except Exception:
+                pass
+            # DIVERGENCIA con CMF: flujo positivo + opciones defensivas (put/call alto o skew alto) = alerta
+            cmf = (flow.get(s, {}) or {}).get("cmf")
+            diverg = None
+            if cmf is not None and pcr_vol is not None:
+                if cmf > 0.05 and (pcr_vol > 1.3 or (skew is not None and skew > 0.06)):
+                    diverg = "flujo entra pero compran protección (posible distribución oculta)"
+                elif cmf < -0.05 and pcr_vol < 0.7:
+                    diverg = "flujo sale pero apuestan alcista (posible suelo / manos fuertes)"
+            mp_dist = None
+            if maxpain and spot:
+                mp_dist = (maxpain / spot - 1) * 100
+                if abs(mp_dist) > 25:            # cadena incompleta o ilíquida: max pain no fiable
+                    maxpain, mp_dist = None, None
+            out[s] = {"exp": exp0, "pcr_vol": (round(pcr_vol, 2) if pcr_vol else None),
+                      "pcr_oi": (round(pcr_oi, 2) if pcr_oi else None),
+                      "iv": (round(iv_atm * 100, 1) if iv_atm else None),
+                      "iv_pct": iv_pct, "skew": (round(skew * 100, 1) if skew is not None else None),
+                      "maxpain": maxpain, "mp_dist": (round(mp_dist, 1) if mp_dist is not None else None),
+                      "spot": round(spot, 2), "cmf": cmf, "diverg": diverg}
+        except Exception:
+            continue
+    return out or None
+
+def explicar_opciones(options, flow=None, rrg=None, cartera=None):
+    """Traduce el OPTIONS DESK a LENGUAJE LLANO, ETF a ETF, cruzado con el flujo (CMF) y el cuadrante RRG.
+    Analogia unica en todo el texto: un PUT es un SEGURO contra caidas; un CALL es una APUESTA a subir;
+    la IV es el PRECIO del seguro. Devuelve lista de dicts ordenada: cartera primero, divergencias despues."""
+    if not options:
+        return None
+    flow, rrg, cartera = flow or {}, rrg or {}, set(cartera or [])
+    _Q = {"leading": "es de los líderes del mercado", "improving": "está mejorando (dejando de ser débil)",
+          "weakening": "está perdiendo fuerza", "lagging": "está entre los rezagados"}
+    out = []
+    for s, o in options.items():
+        frases = []
+        g = rrg.get(s, {})
+        cmf = (flow.get(s, {}) or {}).get("cmf")
+        # 1) situacion del ETF en una frase
+        est = _Q.get(g.get("quad"), "")
+        flu = ("y el dinero de contado ESTÁ ENTRANDO" if (cmf is not None and cmf > 0.05)
+               else "y el dinero de contado ESTÁ SALIENDO" if (cmf is not None and cmf < -0.05)
+               else "con el dinero de contado quieto")
+        if est:
+            frases.append(f"El ETF {est}, {flu}.")
+        # 2) que dicen las opciones, en cristiano
+        pcr, ivp, sk, mp = o.get("pcr_vol"), o.get("iv_pct"), o.get("skew"), o.get("mp_dist")
+        if pcr is not None:
+            if pcr > 1.3:
+                frases.append(f"En opciones se compran {pcr:.1f} seguros contra caídas por cada apuesta a subir: hay MIEDO.")
+            elif pcr < 0.7:
+                frases.append(f"Casi nadie compra seguro (solo {pcr:.1f} por apuesta alcista): CONFIANZA, a veces exceso de ella.")
+            else:
+                frases.append("Los seguros y las apuestas alcistas están equilibrados: sin señal fuerte por aquí.")
+        if ivp is not None:
+            if ivp >= 80:
+                frases.append("El seguro está CARÍSIMO comparado con lo normal: el mercado espera un movimiento fuerte pronto (mira News: suele haber un catalizador con fecha).")
+            elif ivp <= 20:
+                frases.append("El seguro está barato: nadie espera sustos a corto plazo.")
+        if sk is not None and sk > 6:
+            frases.append("Además pagan un EXTRA por protegerse de caídas concretamente (no de subidas): temen el lado de abajo.")
+        elif sk is not None and sk < 0:
+            frases.append("Curioso: la apuesta a subir cuesta MÁS que el seguro — apetito alcista poco habitual.")
+        if mp is not None and abs(mp) >= 2:
+            frases.append(f"El vencimiento de opciones «tira» del precio hacia un {mp:+.1f}% desde aquí (efecto imán del tercer viernes; se disipa al pasar).")
+        # 3) VEREDICTO: el cruce de las dos vias (contado vs opciones), en una frase
+        defensivo = bool((pcr is not None and pcr > 1.3) or (sk is not None and sk > 6))
+        confiado = bool(pcr is not None and pcr < 0.7)
+        if cmf is not None and cmf > 0.05 and defensivo:
+            ver, vcol, prio = "⚠ Suben con una mano y se protegen con la otra: si estás dentro, mantén pero con stop puesto; si estás fuera, no es entrada limpia.", "#F4B740", 0
+        elif cmf is not None and cmf > 0.05 and not defensivo:
+            ver, vcol, prio = "✓ Todo alineado: entra dinero y nadie compra pánico. La señal más limpia que da este panel.", "#2FD08A", 2
+        elif cmf is not None and cmf < -0.05 and confiado:
+            ver, vcol, prio = "🎯 El contado vende pero en opciones apuestan a subir: a veces es la huella de manos fuertes en un suelo. Vigilar, no perseguir.", "#4CC2E0", 1
+        elif cmf is not None and cmf < -0.05 and defensivo:
+            ver, vcol, prio = "✗ Dinero saliendo Y miedo en opciones: las dos vías dicen lo mismo — no es tu sitio ahora.", "#F4607A", 1
+        else:
+            ver, vcol, prio = "— Sin lectura clara: las opciones no añaden nada al flujo esta semana.", "#8FA3C0", 3
+        out.append({"sym": s, "frases": frases, "ver": ver, "vcol": vcol,
+                    "en_cart": s in cartera, "prio": (0 if s in cartera else prio)})
+    out.sort(key=lambda x: (x["prio"], x["sym"]))
+    return out or None
+
 # ----------------------------------------------------------------------
 # HISTORIAL COMPLETO DE EPISODIOS: cada entrada->salida que el sistema ha dado,
 # PERDIDAS INCLUIDAS. Un episodio = racha de semanas consecutivas dentro de la cesta.
@@ -1936,7 +2124,7 @@ GEMELOS_FIJOS = [("SMH", "SOXX"), ("XLE", "XOP", "OIH"), ("TAN", "ICLN", "FAN"),
 def _semaforo(v):
     return "🟢" if v >= 65 else ("🟡" if v >= 45 else "🔴")
 
-def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen, mi_syms, analogos=None, tau=None, desks=None):
+def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen, mi_syms, analogos=None, tau=None, desks=None, options=None):
     try:
         score_by = {r["sym"]: r for r in (scores or [])}
         suelo_by = {r["sym"]: r for r in (suelo or [])}
@@ -2026,6 +2214,11 @@ def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen,
                     cor_lbl = f"max {cmax:.2f} con {cwho}" if cwho else "libre"
             except Exception:
                 pass
+            # divergencia de OPCIONES (antes del score): flujo entra pero compran proteccion = 2a via de distribucion
+            _opt = (options or {}).get(s) if options else None
+            _opt_prot = bool(_opt and _opt.get("diverg") and "protección" in _opt["diverg"])
+            if _opt_prot:
+                c_flu = max(3, c_flu - 8)                      # dos vías discrepan: baja el flujo antes de puntuar
             # score global ponderado (0-100): ETF y flujo son el núcleo; sector, mercado, riesgo y correlación modulan
             score = int(round(c_etf * .25 + c_flu * .25 + c_sec * .15 + mkt * .15 + c_rie * .10 + c_cor * .10))
             # --- FILTRO DE COHERENCIA: un ETF internacional NO puede salir fuerte si su tema espejo US está débil.
@@ -2120,16 +2313,33 @@ def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen,
             if tau and tau.get("activa") and quad == "lagging": contra.append("ventana τ activa: presión vendedora mecánica sobre losers hasta " + tau["win_fin"])
             if coh_txt: contra.insert(0, "🌐 " + coh_txt)     # el más importante para internacionales: va primero
             if jets_txt: contra.insert(0, "✈ " + jets_txt)
+            # divergencia de OPCIONES: si el flujo entra pero compran proteccion, es confirmacion por 2a via
+            if _opt and _opt.get("diverg"):
+                if "protección" in _opt["diverg"]:
+                    contra.insert(0, f"🎯 opciones: {_opt['diverg']} (P/C {_opt.get('pcr_vol')})")
+                elif "suelo" in _opt["diverg"] and es_suelo:
+                    favor.insert(0, "🎯 opciones: apuestan alcista pese al flujo débil (posible manos fuertes)")
             if mkt <= 35: contra.append("el mercado está en distribución: bajar tamaño")
             if prob and prob["n"] < 15: contra.append(f"muestra corta (n={prob['n']}): confianza baja")
-            # conclusion con invalidacion (falsable)
+            # conclusion con invalidacion (falsable) — debe nombrar la restriccion REAL que frena, no un gatillo generico
             if direc.startswith("COMPRAR"):
                 concl = "Se invalida si el CMF cae bajo −0.05 o pierde su media de 20 semanas al cierre del viernes."
             elif direc == "VENDER":
                 concl = "Se revierte si recupera Mejorando con CMF > 0 dos viernes seguidos."
             else:
-                gat = "giro confirmado + CMF > 0" if quad in ("lagging", "improving") else "recuperar impulso (mom > 100)"
-                concl = f"Gatillo para entrar: {gat}, confirmado en cierre de viernes."
+                _etf_listo = quad in ("leading", "improving") and c_flu >= 50 and not distrib
+                _extendida = (hi52 is not None and hi52 >= 97)
+                if veto_coh:
+                    concl = "Lo frena su tema espejo en EE.UU., no su gráfico. Gatillo: que el espejo salga de Debilitándose/Rezagado; hasta entonces la fuerza local no es fiable."
+                elif _etf_listo and mkt < 45:
+                    concl = "El activo está listo; lo frena el MERCADO (régimen en distribución). Gatillo: régimen fuera de distribución dos viernes." + \
+                            (" Si además gira el régimen, la entrada es el retroceso a la media de 20 semanas, no el máximo." if _extendida else " Mientras tanto: mantener sin añadir.")
+                elif _extendida:
+                    concl = "Fuerte pero extendida: la entrada es el retroceso a la media de 20 semanas sin que el flujo se gire (CMF ≥ 0), no perseguir el máximo."
+                elif quad in ("lagging", "improving"):
+                    concl = "Gatillo para entrar: giro confirmado + CMF > 0, confirmado en cierre de viernes."
+                else:
+                    concl = "Gatillo: recuperar impulso (mom > 100) con flujo no negativo, confirmado en cierre de viernes."
             fichas.append({"sym": s, "score": score, "direc": direc, "dcol": dcol,
                            "c": {"mercado": int(round(mkt)), "sector": int(round(c_sec)), "industria": int(round(c_ind)),
                                  "etf": int(round(c_etf)), "flujo": int(round(c_flu)), "riesgo": int(round(c_rie)),
@@ -2519,6 +2729,15 @@ def refrescar_con_yahoo(close, hl, ysym):
         base = close.dropna().copy()
         base.index = pd.to_datetime(base.index).tz_localize(None).normalize() if getattr(base.index, "tz", None) is not None else pd.to_datetime(base.index).normalize()
         nuevos = c[c.index > base.index[-1]]
+        # GUARDIA DE ESCALA: si la serie base es SPY (~740) y el refresco es ^GSPC (~7400), añadir
+        # mezclaria escalas y corromperia el drawdown con un salto de 10x. Solo se añade si el primer
+        # dato nuevo esta a <20% del ultimo de la base (misma escala, movimiento plausible).
+        if len(nuevos):
+            _ratio = float(nuevos.iloc[0]) / float(base.iloc[-1])
+            if not (0.8 <= _ratio <= 1.25):
+                print(f"  [{ysym}] refresco DESCARTADO: escala incompatible con la serie base "
+                      f"(ratio {_ratio:.2f}) — se mantiene la serie original sin mezclar")
+                nuevos = nuevos.iloc[0:0]
         if len(nuevos):
             base = pd.concat([base, nuevos])
             print(f"  [{ysym}] serie larga refrescada con Yahoo: +{len(nuevos)} sesion(es), ultima {nuevos.index[-1].date()}")
@@ -2599,17 +2818,24 @@ def calendario_tau(hoy=None):
             return None
         tau = ses[-1]                                   # ultima sesion del mes
         idx_tau = len(ses) - 1
-        # ventana [tau-8, tau-3] (6 sesiones, ajustada a T+1); rebote [tau-2 .. tau] + 3 primeras del mes siguiente
-        win = ses[max(0, idx_tau - 8): max(0, idx_tau - 2)]
-        reb_fin_mes = ses[max(0, idx_tau - 2):]
+        # VERIFICADO CONTRA EL PAPER COMPLETO (Nathan/Suominen/Tasa, SSRN 6426026):
+        # - Ventana base PreTOM = [tau-9, tau-4] (6 sesiones). La reforma T+1 (may-2024) movio el dia
+        #   marginal de venta de tau-4 a tau-3 (DiD +85.9 pb, t=2.68) pero el paper NO retesta el borde
+        #   izquierdo -> conservador: ventana [tau-9, tau-3], 7 sesiones.
+        # - La presion vendedora sigue elevada hasta fin de mes (TAQ) y amaina en los PRIMEROS dias del
+        #   mes siguiente; ~70% del castigo revierte en la semana Post. Los "momentum crashes" (= rallies
+        #   violentos de losers) se concentran en month-start [tau+1, tau+3] -> ESA es la zona de rebote.
+        win = ses[max(0, idx_tau - 9): max(0, idx_tau - 2)]        # [tau-9 .. tau-3]
+        transicion = ses[max(0, idx_tau - 2):]                      # [tau-2 .. tau]: presion amainando, aun residual
         sig_ini = fin_mes + pd.Timedelta(days=1)
-        ses_sig = _nyse_bdays(sig_ini, sig_ini + pd.Timedelta(days=10))[:3]
-        rebote = reb_fin_mes + ses_sig
-        # los 3 PRIMEROS dias habiles del mes actual siguen siendo zona rebote del mes ANTERIOR
+        rebote = _nyse_bdays(sig_ini, sig_ini + pd.Timedelta(days=10))[:3]   # [tau+1 .. tau+3] del mes siguiente
+        # los 3 PRIMEROS dias habiles del mes actual son la zona rebote del mes ANTERIOR
         primeras3 = [d.normalize() for d in ses[:3]]
         estado, col = "NEUTRO", "#8FA3C0"
         if hoy in [d.normalize() for d in win]:
             estado, col = "VENTANA ACTIVA", "#F4B740"
+        elif hoy in [d.normalize() for d in transicion]:
+            estado, col = "TRANSICIÓN", "#4CC2E0"
         elif hoy in [d.normalize() for d in rebote] or hoy in primeras3:
             estado, col = "ZONA REBOTE", "#2FD08A"
         # si hoy no es sesion (finde/festivo), estado del proximo dia habil informativamente
@@ -2618,9 +2844,11 @@ def calendario_tau(hoy=None):
         faltan_v = len([d for d in ses if hoy < d.normalize() <= win[0].normalize()]) if win and hoy < win[0] else 0
         return {"estado": estado, "col": col, "tau": _f(tau),
                 "win_ini": _f(win[0]) if win else "?", "win_fin": _f(win[-1]) if win else "?",
+                "trans_ini": _f(transicion[0]) if transicion else "?", "trans_fin": _f(transicion[-1]) if transicion else "?",
                 "reb_ini": _f(rebote[0]) if rebote else "?", "reb_fin": _f(rebote[-1]) if rebote else "?",
                 "faltan_ventana": faltan_v,
-                "activa": estado == "VENTANA ACTIVA", "rebote": estado == "ZONA REBOTE"}
+                "activa": estado == "VENTANA ACTIVA", "transicion": estado == "TRANSICIÓN",
+                "rebote": estado == "ZONA REBOTE"}
     except Exception as e:
         print(f"  calendario tau: {e}")
         return None
@@ -4805,7 +5033,7 @@ def _spark(vals, w=70, h=20, color=None, sw=1.4):
 
 
 def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred, flow=None, bt=None,
-               dd=None, dd_meta=None, plan=None, fx=None, long_src="", ai_text=None, leaders=None, leaders_n=0, bt2=None, heatmap=None, scores=None, probs=None, season=None, early=None, sector_breadth=None, meanrev=None, nq_close=None, fg_idx=None, spy_flow=None, watch=None, giro=None, desks=None, dix=None, suelo_pre=None, centinela=None, graduados=None, daily=None, ia_auto=None, tau=None, analogos=None, es_fut=None):
+               dd=None, dd_meta=None, plan=None, fx=None, long_src="", ai_text=None, leaders=None, leaders_n=0, bt2=None, heatmap=None, scores=None, probs=None, season=None, early=None, sector_breadth=None, meanrev=None, nq_close=None, fg_idx=None, spy_flow=None, watch=None, giro=None, desks=None, dix=None, suelo_pre=None, centinela=None, graduados=None, daily=None, ia_auto=None, tau=None, analogos=None, es_fut=None, options=None):
     rank = {"leading": 0, "weakening": 1, "improving": 2, "lagging": 3}
     ranked = sorted(rrg.items(), key=lambda kv: (rank[kv[1]["quad"]], -kv[1]["mom"]))
     last_date = df.index[-1].date()
@@ -4930,6 +5158,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
         "<button class='viewtab mainview' onclick=\"mainView('bbg',this)\" style='font-size:13px;padding:7px 16px;border-color:#FFB00055;color:#FFB000'>🖥️ PRO</button>"
         "<button class='viewtab mainview' onclick=\"mainView('rds',this)\" style='font-size:13px;padding:7px 16px;border-color:#4CC2E055;color:#4CC2E0'>📣 Redes</button>"
         "<button class='viewtab mainview' onclick=\"mainView('cl',this)\" style='font-size:13px;padding:7px 16px'>🤖 Modo Claude</button>"
+        "<button class='viewtab mainview' onclick=\"mainView('news',this)\" style='font-size:13px;padding:7px 16px;border-color:#2FD08A55;color:#2FD08A'>📰 News</button>"
         "<span style='flex:1'></span>"
         "<button class='viewtab' onclick='descargarPDF()' title='Resumen semanal en PDF (imprimible / para Substack)' style='font-size:12px;padding:7px 12px;border-color:#5B8CFF55;color:#5B8CFF'>📄 Resumen PDF</button>"
         "<button class='viewtab' onclick='descargarJPG()' title='Resumen semanal en JPG (para X / Telegram; necesita internet)' style='font-size:12px;padding:7px 12px;border-color:#5B8CFF33'>🖼 JPG</button>"
@@ -5380,10 +5609,16 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
             _es_line = ""
             if es_fut:
                 try:
-                    _es_dd = (es_fut["last"] / plan["peak"] - 1) * 100
-                    _es_line = (f"<div class='sm' style='margin-top:3px'>Futuro ES (casi 24h): <b>{es_fut['last']}</b> "
-                                f"({_es_dd:+.1f}% vs ATH) · {es_fut['ts']} <span style='color:#5E708A'>— la referencia más fresca; "
-                                f"el contado siempre va por detrás</span></div>")
+                    # el ES cotiza en PUNTOS DE INDICE (~7500); si la serie de referencia es SPY (~750),
+                    # se reescala por la potencia de 10 mas cercana antes de comparar (el +888% de la v1 era esto)
+                    _fac = 10 ** round(math.log10(max(es_fut["last"], 1e-9) / max(plan["last"], 1e-9)))
+                    _es_adj = es_fut["last"] / _fac
+                    _es_dd = (_es_adj / plan["peak"] - 1) * 100
+                    if abs(_es_dd) < 15:                      # sanidad: si aun asi sale absurdo, no se muestra
+                        _es_esc = f" (≈{_es_adj:.1f} en escala {esc(long_src)})" if _fac != 1 else ""
+                        _es_line = (f"<div class='sm' style='margin-top:3px'>Futuro ES (casi 24h): <b>{es_fut['last']}</b>{_es_esc} "
+                                    f"({_es_dd:+.1f}% vs ATH) · {es_fut['ts']} <span style='color:#5E708A'>— la referencia más fresca; "
+                                    f"el contado siempre va por detrás</span></div>")
                 except Exception:
                     pass
             left = (f"<div class='dd-now'><div class='lab'>Caida actual del {idx_name} desde su MAXIMO INTRADIA</div>"
@@ -6931,7 +7166,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
     try:
         _mi_syms = {t[0] for t in MI_CARTERA} if MI_CARTERA else set()
         _fichas = compute_fichas(df, daily or {}, rrg, flow or {}, scores, suelo_pre, centinela, plan,
-                                 CARTERA_FINAL, _mi_syms, analogos=analogos, tau=tau, desks=desks)
+                                 CARTERA_FINAL, _mi_syms, analogos=analogos, tau=tau, desks=desks, options=options)
         # --- cabecera de contexto: mercado + analogos + tau, todo en una franja ---
         ctx = []
         if centinela:
@@ -6945,6 +7180,18 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                        f"<span style='color:#5E708A'>(IC95 {_a3['lo']}–{_a3['hi']}, mediana {_a3['med']:+.1f}%, n={_a3['n']})</span>")
         if tau:
             ctx.append(f"ciclo τ: <b style='color:{tau['col']}'>{tau['estado']}</b>")
+        # DIVERGENCIA entre relojes: el sesgo de flujo (spread RRG ciclicos-defensivos) y el Centinela
+        # (flujo+amplitud+credito) pueden discrepar. Regla de la casa: se SEÑALA, no se reconcilia.
+        try:
+            _rl = (risk or {}).get("label", "")
+            _ce = (centinela or {}).get("estado", "")
+            if _rl == "Risk-ON" and _ce in ("DISTRIBUCION", "LIQUIDEZ"):
+                ctx.append("<span style='color:#F4B740'>⚠ divergencia de relojes: sesgo de flujo <b>Risk-ON</b> pero Centinela en <b>" + _ce +
+                           "</b> — el precio aún manda pero el dinero se recoloca; señal mixta, prudencia con tamaño</span>")
+            elif _rl == "Risk-OFF" and _ce == "RISK-ON":
+                ctx.append("<span style='color:#F4B740'>⚠ divergencia de relojes: sesgo Risk-OFF con Centinela RISK-ON — señal mixta</span>")
+        except Exception:
+            pass
         _lideres_t = [ff["sym"] for ff in (_fichas or []) if ff.get("lider_temp")][:5]
         # --- CONFLUENCIA DE REBOTE: ideas tacticas rapidas (SEPARADAS de la cartera de rotacion) ---
         # Candados: (1) etiqueta tactica explicita; (2) vehiculo CONTADO por defecto, apalancado solo
@@ -7068,10 +7315,11 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
         # --- CALENDARIO tau (informativo) ---
         if tau:
             _reglas = ("<div style='font-size:11px;color:#B9C9E2;line-height:1.8'>"
-                       "· Dentro de la ventana: <b>no comprar suelos ni promediar débiles</b> — la venta sobre losers es mecánica (liquidez de fin de mes), el CMF ahí es ambiguo.<br>"
-                       "· Si el lunes de ejecución cae dentro de la ventana Y el activo es un loser (rezagado, caída fuerte): <b>aplazar al primer lunes fuera</b>. Winners no se aplazan.<br>"
-                       f"· Mejor zona del mes para el cazador de suelos: <b style='color:#2FD08A'>{tau['reb_ini']} → {tau['reb_fin']}</b> (la presión terminó, rebote de losers favorable).<br>"
-                       "· Apalancados 3x/5x sobre sectores débiles: su mayor riesgo mensual es justo la ventana — vigilar margen XTB.</div>")
+                       "· <b>VENTANA</b> (τ−9→τ−3): venta mecánica sobre losers (−7.9 pb/día, t=−3.7). <b>No comprar suelos ni promediar débiles</b>; el CMF ahí es ambiguo. Vender losers va A FAVOR del viento.<br>"
+                       f"· <b>TRANSICIÓN</b> ({tau.get('trans_ini','?')} → {tau.get('trans_fin','?')}): la presión amaina pero los datos de órdenes (TAQ) muestran venta residual hasta fin de mes. Aún sin prisa.<br>"
+                       f"· <b>REBOTE</b> (<b style='color:#2FD08A'>{tau['reb_ini']} → {tau['reb_fin']}</b>): el desagüe termina y ~70% del castigo revierte en la semana; los rallies violentos de losers se concentran en el arranque de mes. La franja del cazador de suelos.<br>"
+                       "· Si el lunes de ejecución cae en ventana Y el activo es un loser: <b>aplazar la compra a la zona de rebote</b>. Winners no se aplazan (el efecto es 100% de losers).<br>"
+                       "· Apalancados 3x/5x sobre sectores débiles: su mayor riesgo mensual es la ventana — vigilar margen XTB. Inversos sobre losers (tipo SOXS): el arranque de mes es donde más duelen.</div>")
             html.append(f"<div class='panel full' style='border-color:{tau['col']}55'>"
                         f"<h2>📅 CALENDARIO τ — ciclo intramensual de momentum</h2>"
                         f"<div style='display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px'>"
@@ -7080,10 +7328,11 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                         f"τ (última sesión del mes): <b>{tau['tau']}</b>"
                         + (f" · faltan {tau['faltan_ventana']} sesiones para la ventana" if tau.get('faltan_ventana') else "") + "</div></div>"
                         + _reglas +
-                        "<div class='note' style='margin-top:6px'>Base: Nathan, Suominen &amp; Tasa (jun 2026) — el momentum en EE.UU. se concentra en 6 sesiones que acaban 4 días antes de fin de mes, "
-                        "por venta forzada de LOSERS para liquidez de fin de mes; el efecto viene del decil perdedor, no de los winners. Ajustado a T+1: ventana [τ−8, τ−3]. "
-                        "Es un overlay informativo sobre tu ritmo viernes→lunes, no un sistema. <b>Invalidación:</b> registrar 6 meses el retorno de posiciones-loser dentro vs fuera de ventana; "
-                        "si dentro no es sistemáticamente peor, retirar el overlay. Anomalía publicada: puede decaer.</div></div>")
+                        "<div class='note' style='margin-top:6px'>Verificado contra el paper completo (Nathan, Suominen &amp; Tasa, SSRN 6426026): PreTOM base [τ−9, τ−4]; "
+                        "la reforma T+1 (may-2024) movió el día marginal de venta de τ−4 a τ−3 (dif. +85.9 pb, t=2.68) — el borde izquierdo no está retestado, así que la ventana aquí es [τ−9, τ−3] por prudencia. "
+                        "El efecto lo generan los losers del decil inferior; ordenar por <b>distancia al máximo de 52 semanas</b> (lo que mide DURMIENTES) captura la venta forzada aún mejor que el momentum clásico ($45.7 vs $18.8 por dólar en ventana). "
+                        "~70% del castigo de ventana revierte en la semana siguiente; el 30% restante tarda meses. Overlay informativo sobre tu ritmo viernes→lunes, no un sistema. "
+                        "<b>Invalidación:</b> 6 meses de registro losers dentro-vs-fuera de ventana; si dentro no es peor, se retira. Anomalía muy publicada (Money Stuff, mar-2026): puede decaer rápido.</div></div>")
         # --- todo lo clasico de Operativa queda debajo, plegado por defecto (nada se elimina) ---
         html.append("<details style='margin:4px 0 10px'><summary style='cursor:pointer;font-size:13px;color:#8FA3C0;"
                     "padding:8px 12px;background:#0E1626;border:1px solid #24344F;border-radius:8px'>"
@@ -7644,6 +7893,37 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
             fm += "</tr>"
         fm += "</table><div style='font-size:10px;color:#666;margin-top:4px'>CMF 20s · umbral ±0.05 · DIV! = distribución oculta (precio sube, dinero sale)</div>"
         html.append(_mod("FLOW MONITOR — DÓNDE ENTRA Y SALE EL DINERO", fm))
+        # --- MODULO OPTIONS DESK: put/call, IV percentil, skew, max pain y DIVERGENCIA con el CMF ---
+        if options:
+            _ordit = sorted(options.items(), key=lambda kv: (kv[1].get("diverg") is None, -(kv[1].get("pcr_vol") or 0)))
+            od = ("<table><tr style='color:#888;font-size:10px'><td>ETF</td><td>P/C vol</td><td>P/C OI</td>"
+                  "<td>IV</td><td>IV pct</td><td>skew</td><td>max pain</td><td>señal</td></tr>")
+            for _s, _o in _ordit:
+                _pcr = _o.get("pcr_vol")
+                _pcc = RED if (_pcr and _pcr > 1.3) else (GRN if (_pcr and _pcr < 0.7) else GRY)
+                _ivp = _o.get("iv_pct")
+                _ivpc = RED if (_ivp is not None and _ivp >= 80) else (GRN if (_ivp is not None and _ivp <= 20) else GRY)
+                _sk = _o.get("skew")
+                _skc = RED if (_sk is not None and _sk > 6) else (CYN if (_sk is not None and _sk < 0) else GRY)
+                _mp = _o.get("mp_dist")
+                _mptxt = (f"{_o['maxpain']:g} ({_mp:+.1f}%)" if _o.get("maxpain") and _mp is not None else "—")
+                _dv = _o.get("diverg")
+                _dvtxt = (f"<span style='color:{AMB}'>⚠ {esc(_dv[:38])}</span>" if _dv else "")
+                od += (f"<tr><td><b style='color:{CYN}'>{_s}</b></td>"
+                       f"<td style='color:{_pcc}'>{_pcr if _pcr is not None else '—'}</td>"
+                       f"<td style='color:{GRY}'>{_o.get('pcr_oi') if _o.get('pcr_oi') is not None else '—'}</td>"
+                       f"<td style='color:{GRY}'>{(str(_o['iv']) + '%') if _o.get('iv') is not None else '—'}</td>"
+                       f"<td style='color:{_ivpc}'>{(str(_ivp)) if _ivp is not None else '—'}</td>"
+                       f"<td style='color:{_skc}'>{(f'{_sk:+.1f}') if _sk is not None else '—'}</td>"
+                       f"<td style='color:{GRY};font-size:10px'>{_mptxt}</td>"
+                       f"<td style='font-size:10px'>{_dvtxt}</td></tr>")
+            od += ("</table><div style='font-size:10px;color:#666;margin-top:4px'>"
+                   "Opciones de Yahoo (gratis). P/C&gt;1.3 = miedo/protección (rojo); &lt;0.7 = codicia (verde). "
+                   "IV pct = % del tiempo que la vol realizada estuvo por debajo de la IV actual (alto = catalizador caro, cruza con News). "
+                   "skew&gt;6 = pagan por protección a la baja. max pain = imán de precio al vencimiento (útil el 3er viernes). "
+                   "⚠ = DIVERGENCIA con el CMF: el flujo dice una cosa y las opciones otra — tu confirmación por segunda vía. "
+                   "Liquidez fiable solo en ETFs USA; sirven de señal aunque operes los UCITS.</div>")
+            html.append(_mod("OPTIONS DESK — POSICIONAMIENTO EN DERIVADOS · DIVERGENCIA vs FLUJO", od))
         # --- MODULO 3: ROTATION READOUT (RRG) ---
         _qcount = {"leading": [], "improving": [], "weakening": [], "lagging": []}
         _movers = []
@@ -8313,6 +8593,34 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                            + vr2 + "</table></div></div>")
         except Exception:
             pass
+        # --- OPCIONES EN CRISTIANO: el OPTIONS DESK traducido a frases simples, ETF a ETF ---
+        try:
+            _exp = explicar_opciones(options, flow=flow, rrg=rrg, cartera=(set(CARTERA_FINAL or []) | ({t[0] for t in MI_CARTERA} if MI_CARTERA else set())))
+            if _exp:
+                _bloq = ""
+                _visibles = [e for e in _exp if e["en_cart"] or e["prio"] <= 1][:14]
+                _resto = [e for e in _exp if e not in _visibles]
+                for _e in _visibles:
+                    _tagc = " <span style='font-size:9px;color:#5B8CFF'>EN CARTERA</span>" if _e["en_cart"] else ""
+                    _fr = " ".join(esc(x) for x in _e["frases"])
+                    _bloq += (f"<div style='margin:7px 0;padding:9px 12px;background:#0E1626;border-left:3px solid {_e['vcol']};border-radius:8px'>"
+                              f"<div style='font-size:13px'><b style='color:#E6EDF6'>{_e['sym']}</b>{_tagc}</div>"
+                              f"<div style='font-size:12px;color:#B9C9E2;margin:3px 0;line-height:1.65'>{_fr}</div>"
+                              f"<div style='font-size:12px;color:{_e['vcol']};font-weight:600'>{esc(_e['ver'])}</div></div>")
+                if _resto:
+                    _filas_r = "".join(f"<div style='font-size:11px;margin:3px 0'><b style='color:#8FA3C0'>{_e['sym']}</b> "
+                                       f"<span style='color:{_e['vcol']}'>{esc(_e['ver'])}</span></div>" for _e in _resto)
+                    _bloq += (f"<details style='margin-top:5px'><summary style='cursor:pointer;font-size:11px;color:#8FA3C0'>"
+                              f"el resto del universo — {len(_resto)} ETFs más (solo veredicto)</summary>{_filas_r}</details>")
+                _cl.append("<div class='panel full' style='border-color:#4CC2E055'>"
+                           "<h2>🎓 OPCIONES EN CRISTIANO — qué está pasando en cada ETF, sin jerga</h2>"
+                           "<div class='note'>Para leerlo solo necesitas esto: un <b>put es un seguro contra caídas</b>, un <b>call es una apuesta a que sube</b>, "
+                           "y la <b>IV es el precio de ese seguro</b>. Aquí cruzo lo que hace el dinero de contado (tu CMF) con lo que hacen en opciones: "
+                           "cuando las dos vías coinciden, la señal es fuerte; cuando discrepan, alguien miente — y suele mentir el precio. "
+                           "Cartera primero, luego los avisos. No es asesoramiento.</div>"
+                           + _bloq + "</div>")
+        except Exception as _e_exp:
+            print(f"  opciones en cristiano: {_e_exp}")
         # --- PANEL DE IA AUTOMATICA: la respuesta del maestro, generada EN ESTE BUILD ---
         try:
             if ia_auto:
@@ -8395,6 +8703,59 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
         html.append("".join(_cl))
     except Exception:
         html.append("<div id='vista-cl' style='display:none'></div>")
+
+    # ===== V-NEWS — solo noticias/catalizadores CON FECHA que mueven las posiciones =====
+    try:
+        html.append("<div id='vista-news' style='display:none'>")
+        # 1) respuesta de la IA con busqueda web (si hay key): el filtro duro de noticias
+        _rn = (ia_auto or {}).get("news")
+        if _rn:
+            _ncol = "#2FD08A" if _rn["ok"] else "#F4607A"
+            _ncuerpo = esc(_rn["text"]).replace(chr(10) + chr(10), "</p><p>").replace(chr(10), "<br>")
+            html.append(f"<div class='panel full' style='border:1px solid {_ncol}55'>"
+                        f"<h2 style='color:{_ncol}'>📰 NEWS — catalizadores con fecha, filtrados para tu universo</h2>"
+                        "<div class='note'>Generado en este build con búsqueda web: solo eventos fechados que pueden mover tus ETFs. "
+                        "Sin opiniones de analistas, sin price targets, sin ruido. Contrasta las fechas antes de operar — la IA puede equivocarse. No es asesoramiento.</div>"
+                        f"<div style='font-size:13px;line-height:1.75;color:#DCE6F5'><p>{_ncuerpo}</p></div>"
+                        f"<div class='note' style='margin-top:6px;color:#5E708A'>modelo {esc(_rn['modelo'])} · se regenera en cada ejecución del terminal</div></div>")
+        else:
+            html.append("<div class='panel full'><h2>📰 NEWS — SIN ACTIVAR</h2>"
+                        "<div class='note'>Esta pestaña se llena automáticamente en cada build con los catalizadores fechados de las próximas 2 semanas "
+                        "(FOMC, resultados que arrastran a tus ETFs, regulación, geopolítica), muy filtrados para tu universo. "
+                        "Necesita la API key de Anthropic (crea <code>anthropic_key.txt</code> junto al script) y <code>IA_WEB_SEARCH=True</code>. "
+                        "El prompt «news» ya está en la biblioteca y en <code>IA_AUTO_EXTRA</code>.</div></div>")
+        # 2) CALENDARIO FIJO: fechas estructurales que no dependen de la IA (verificadas jul-2026)
+        _hoy_n = dt.date.today()
+        _fomc = [("2026-07-29", "FOMC — decisión de tipos 14:00 ET (reunión 28-29; sin dot plot)"),
+                 ("2026-09-16", "FOMC — decisión + dot plot (SEP)"),
+                 ("2026-10-28", "FOMC — decisión de tipos"),
+                 ("2026-12-09", "FOMC — decisión + dot plot (SEP)")]
+        _prox = [(f, t) for f, t in _fomc if dt.date.fromisoformat(f) >= _hoy_n][:3]
+        try:
+            _prox = sorted(_prox + [(f, "⚡ " + t) for f, t in (EVENTOS_MERCADO or [])
+                                    if dt.date.fromisoformat(f) >= _hoy_n - dt.timedelta(days=2)])[:6]
+        except Exception:
+            pass
+        _rows_cal = "".join(f"<tr><td style='padding:3px 8px;color:#F4B740;white-space:nowrap'><b>{f}</b></td>"
+                            f"<td style='padding:3px 8px'>{t}</td></tr>" for f, t in _prox)
+        _tau_row = ""
+        if tau:
+            _tau_row = (f"<tr><td style='padding:3px 8px;color:{tau['col']};white-space:nowrap'><b>ciclo τ</b></td>"
+                        f"<td style='padding:3px 8px'>ventana {tau['win_ini']}→{tau['win_fin']} · transición {tau['trans_ini']}→{tau['trans_fin']} · "
+                        f"rebote <b style='color:#2FD08A'>{tau['reb_ini']}→{tau['reb_fin']}</b></td></tr>")
+        html.append("<div class='panel full' style='border-color:#F4B74033'>"
+                    "<h2>🗓 CALENDARIO ESTRUCTURAL — fechas que no cambian con el ruido</h2>"
+                    "<table style='width:100%;border-collapse:collapse;font-size:12px'>" + _rows_cal + _tau_row +
+                    "<tr><td style='padding:3px 8px;color:#8FA3C0;white-space:nowrap'><b>mensuales</b></td>"
+                    "<td style='padding:3px 8px;color:#8FA3C0'>NFP: primer viernes de mes · CPI: ~mediados · PCE: fin de mes · "
+                    "vencimiento de opciones: tercer viernes — confirmar horas en el calendario económico</td></tr></table>"
+                    "<div class='note' style='margin-top:6px'>Fechas FOMC verificadas contra el calendario oficial de la Fed (jul-2026). "
+                    "La regla de la casa: los catalizadores fechados se cruzan SIEMPRE con el ciclo τ — un FOMC en transición τ (como el del 29-jul) "
+                    "amplifica el giro de fin de mes en las dos direcciones.</div></div>")
+        html.append("</div>")
+    except Exception as _e_news:
+        print(f"  vista news: {_e_news}")
+        html.append("<div id='vista-news' style='display:none'></div>")
 
     # ---- RESUMEN SEMANAL DESCARGABLE (PDF imprimible / JPG para redes) ----
     try:
@@ -8553,6 +8914,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                 "var bg=document.getElementById('vista-bbg');if(bg)bg.style.display=(v=='bbg')?'contents':'none';"
                 "var rd=document.getElementById('vista-rds');if(rd)rd.style.display=(v=='rds')?'contents':'none';"
                 "var cl=document.getElementById('vista-cl');if(cl)cl.style.display=(v=='cl')?'contents':'none';"
+                "var nw=document.getElementById('vista-news');if(nw)nw.style.display=(v=='news')?'contents':'none';"
                 "document.querySelectorAll('.mainview').forEach(function(x){x.classList.remove('active')});b.classList.add('active');window.scrollTo(0,0);}</script>")
     html.append("</main>")
     gen = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
@@ -8606,9 +8968,16 @@ def main():
     bt = backtest(df, rrg, hold=("leading", "improving")) if BACKTEST else None
     bt2 = backtest(df, rrg, hold=("leading", "improving", "weakening")) if BACKTEST else None
     long_close, long_src, long_hl = fetch_long_close()
-    # FIX caida-desde-ATH: Stooq llega con retraso -> se refresca con Yahoo (^GSPC) y el pico usa Highs intradia
-    long_close, long_hl = refrescar_con_yahoo(long_close, long_hl, "^GSPC")
+    # FIX caida-desde-ATH: Stooq llega con retraso -> se refresca con Yahoo, usando el MISMO activo
+    # que la fuente real de la serie (si cayo al fallback SPY, refrescar con SPY: mezclar escalas
+    # SPY ~740 / ^GSPC ~7400 corromperia el drawdown). El pico usa Highs intradia.
+    _ysym_ref = "SPY" if "spy" in str(long_src).lower() else "^GSPC"
+    long_close, long_hl = refrescar_con_yahoo(long_close, long_hl, _ysym_ref)
     es_fut = fetch_es_futuro()
+    _uni_opt = [s for s in (SECTORS + THEMATIC + EXTRA) if s in df.columns]
+    print("  OPTIONS DESK: descargando cadenas de opciones de Yahoo ...")
+    options = compute_options(_uni_opt, flow=flow, daily=daily)
+    print(f"  OPTIONS DESK: {len(options) if options else 0} ETFs con datos de opciones")
     tau = calendario_tau()
     analogos = compute_analogos(long_close) if long_close is not None else None
     dd, dd_meta = (drawdown_stats(long_close, DD_THRESHOLDS, hl=long_hl) if long_close is not None else (None, None))
@@ -8741,7 +9110,7 @@ def main():
             print("\nAviso enviado.")
 
     html = build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred, flow=flow, bt=bt,
-                      dd=dd, dd_meta=dd_meta, plan=plan, fx=fx, long_src=long_src, ai_text=ai_text, leaders=leaders, leaders_n=leaders_n, bt2=bt2, heatmap=heatmap, scores=scores, probs=probs, season=season, early=early, sector_breadth=sector_breadth, meanrev=meanrev, nq_close=nq_close, fg_idx=fg_idx, spy_flow=spy_flow, watch=watch, giro=_giro, desks=_desks, dix=_dix, suelo_pre=_suelo, centinela=_centinela, graduados=_graduados, daily=daily, ia_auto=ia_auto, tau=tau, analogos=analogos, es_fut=es_fut)
+                      dd=dd, dd_meta=dd_meta, plan=plan, fx=fx, long_src=long_src, ai_text=ai_text, leaders=leaders, leaders_n=leaders_n, bt2=bt2, heatmap=heatmap, scores=scores, probs=probs, season=season, early=early, sector_breadth=sector_breadth, meanrev=meanrev, nq_close=nq_close, fg_idx=fg_idx, spy_flow=spy_flow, watch=watch, giro=_giro, desks=_desks, dix=_dix, suelo_pre=_suelo, centinela=_centinela, graduados=_graduados, daily=daily, ia_auto=ia_auto, tau=tau, analogos=analogos, es_fut=es_fut, options=options)
     os.makedirs(SITE_DIR, exist_ok=True)
     # copiar archivos estaticos (iconos, manifest, service worker) al sitio
     if os.path.isdir(STATIC_DIR):
