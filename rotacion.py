@@ -256,7 +256,7 @@ ANTHROPIC_API_KEY = ""                           # opcional: https://console.ant
 AI_MODEL = "claude-haiku-4-5"                    # modelo del comentario corto (editable segun tu cuenta)
 # --- IA AUTOMATICA en Modo Claude: al ejecutar el terminal, se lanza el prompt MAESTRO con tus datos ---
 IA_AUTO = True                                   # ejecutar automaticamente el prompt maestro en cada build (si hay API key)
-IA_AUTO_EXTRA = ["news","sectorial","flujos","liderazgo","ocultas","ciclo","insiders","narrativas","multifactor"]  # TODOS los prompts se auto-ejecutan (deja [] para solo el maestro; cada uno suma tiempo y coste)
+IA_AUTO_EXTRA = ["news"]   # ademas del maestro "resumen", se auto-ejecuta "news" (pestana News). Anade mas si quieres (cada uno suma coste)  # TODOS los prompts se auto-ejecutan (deja [] para solo el maestro; cada uno suma tiempo y coste)
 IA_AUTO_MODEL = "claude-sonnet-4-6"              # modelo del analisis largo. Alternativas: "claude-opus-4-6" (mejor y mas caro), "claude-haiku-4-5" (mas barato)
 IA_WEB_SEARCH = True                             # permitir a la IA buscar en la web (13F, VIX, earnings...); suma coste por busqueda
 IA_MAX_TOKENS = 2000                             # longitud maxima de cada respuesta
@@ -270,6 +270,18 @@ IA_COMPAT_MODEL = "gemini-2.0-flash"                                          # 
 IA_COMPAT_KEY = ""                               # key del proveedor compatible (o variable de entorno IA_COMPAT_KEY)
 # --- Biblioteca de prompts (los 9 de Pedro): el maestro se auto-ejecuta; el resto, copiables o via IA_AUTO_EXTRA ---
 IA_PROMPTS = [
+    ("resumen", "🧑‍🏫 RESUMEN PARA HUMANOS (el maestro diario)",
+     "Eres mi analista de confianza y me lo explicas TODO en lenguaje muy sencillo, como a un amigo listo que NO sabe de finanzas. "
+     "Con los datos de mi terminal que van debajo, escribe un resumen corto y claro con esta estructura EXACTA, sin tecnicismos "
+     "(si usas una palabra financiera, explicala entre parentesis con palabras normales):\n"
+     "1) COMO ESTA EL MERCADO HOY - dos frases: hay que tener miedo o tranquilidad, y el dinero entra o sale en general.\n"
+     "2) MIS POSICIONES, UNA A UNA - para cada ETF de mi cartera: sigo dentro o me salgo, una frase cada uno.\n"
+     "3) LO MEJOR PARA ESTA SEMANA - las 2-3 oportunidades mas claras y por que, sin jerga.\n"
+     "4) LO QUE DEBO EVITAR - que NO tocar y por que, una linea cada cosa.\n"
+     "5) EL PELIGRO DE LA SEMANA - la unica cosa que mas podria estropear mis inversiones, y que vigilar.\n"
+     "6) QUE HACER EL LUNES - pasos concretos, como una lista de la compra.\n"
+     "Reglas: maximo una carilla. Nada de tablas. Frases cortas. Si mi terminal y tu no coincidis, dilo claro. "
+     "Recuerda mi norma: el dinero que se mueve manda sobre las historias bonitas. Cierra con una frase de animo realista. No es asesoramiento; yo decido."),
     ("news", "📰 News — solo lo que mueve TUS posiciones",
      "Eres el filtro de noticias de un inversor de rotacion sectorial. Busca en la web SOLO los 6-8 catalizadores CON FECHA "
      "de las proximas 2 semanas que puedan mover de verdad este universo: semiconductores (SMH/SOXX), biotech (XBI), banca regional (KRE), "
@@ -1855,49 +1867,60 @@ def _px_en_fecha(serie, fecha):
     except Exception:
         return None
 
+# --- PROXY DE OPCIONES para ETFs con opciones ILIQUIDAS: se leen las 2-3 acciones mas grandes
+#     del ETF (sus opciones si tienen volumen) y se PROMEDIAN, diluyendo el ruido idiosincratico
+#     de una sola empresa. Es SEÑAL DE APOYO etiquetada como tal: la principal sigue siendo el
+#     CMF del ETF completo. Editable: anade pares ETF -> [acciones] cuando salgan mas iliquidos. ---
+OPCIONES_PROXY = {
+    "KRE":  ["USB", "TFC", "FITB"],      # banca regional: US Bancorp, Truist, Fifth Third
+    "EWG":  ["SAP", "DB"],               # Alemania: SAP y Deutsche Bank (ADRs con opciones liquidas)
+    "ITB":  ["DHI", "LEN"],              # constructoras: D.R. Horton, Lennar
+    "FIW":  ["AWK", "XYL"],              # agua: American Water Works, Xylem
+    "CIBR": ["PANW", "CRWD"],            # ciberseguridad: Palo Alto, CrowdStrike
+}
+
 def compute_options(symbols, flow=None, daily=None, max_syms=40):
-    """OPTIONS DESK — descarga cadenas de opciones de Yahoo (gratis, misma fuente) y calcula por ETF:
-    put/call ratio (volumen y OI), IV media y su PERCENTIL historico aproximado, skew (IV puts OTM vs calls OTM),
-    y max pain del vencimiento mas cercano. Lo valioso: DIVERGENCIA con el CMF (dinero entra por flujo pero
-    compran proteccion en opciones = distribucion oculta confirmada por otra via). Best-effort, nunca rompe el build.
-    Las opciones liquidas estan en ETFs USA; sirven de SEÑAL aunque Pedro opere sus equivalentes UCITS."""
+    """OPTIONS DESK — descarga cadenas de opciones de Yahoo (gratis) y calcula por ETF: put/call
+    (volumen y OI), IV y su percentil aprox, skew y max pain. Si el ETF sale ILIQUIDO y tiene
+    proxy definido, se analizan sus 2-3 acciones mas grandes y se promedian (señal de apoyo,
+    etiquetada). La divergencia con el CMF del ETF es lo valioso. Best-effort, nunca rompe."""
     if yf is None:
         return None
-    out = {}
     hoy = pd.Timestamp.today().normalize()
     flow = flow or {}
-    for i, s in enumerate(symbols[:max_syms]):
+
+    def _analiza(tkr, spot_hint=None):
+        """Analiza la cadena de UN ticker. Devuelve dict con metricas crudas o None."""
         try:
-            tk = yf.Ticker(s)
+            tk = yf.Ticker(tkr)
             exps = tk.options
             if not exps:
-                continue
-            # vencimiento mas cercano a >=5 dias (evita el ruido del 0DTE) y el mensual siguiente
+                return None
             futuras = [e for e in exps if pd.Timestamp(e) >= hoy]
             if not futuras:
-                continue
+                return None
             exp0 = next((e for e in futuras if (pd.Timestamp(e) - hoy).days >= 5), futuras[0])
             ch = tk.option_chain(exp0)
             calls, puts = ch.calls, ch.puts
             if calls is None or puts is None or not len(calls) or not len(puts):
-                continue
+                return None
             cvol, pvol = float(calls["volume"].fillna(0).sum()), float(puts["volume"].fillna(0).sum())
             coi, poi = float(calls["openInterest"].fillna(0).sum()), float(puts["openInterest"].fillna(0).sum())
-            pcr_vol = (pvol / cvol) if cvol > 0 else None
-            pcr_oi = (poi / coi) if coi > 0 else None
-            # spot
-            spot = None
-            try:
-                if daily and s in daily and daily[s] is not None:
-                    spot = float(daily[s]["Close"].dropna().iloc[-1])
-            except Exception:
-                pass
+            _liq_vol = (cvol >= 300 and pvol >= 100)
+            _liq_oi = (coi >= 1000 and poi >= 500)
+            pcr_vol = (pvol / cvol) if (cvol > 0 and _liq_vol) else None
+            pcr_oi = (poi / coi) if (coi > 0 and _liq_oi) else None
+            if pcr_vol is not None and pcr_vol > 3.5:
+                pcr_vol = None
+            if pcr_oi is not None and pcr_oi > 3.5:
+                pcr_oi = None
+            iliq = not (_liq_vol or _liq_oi)
+            spot = spot_hint
             if spot is None:
                 try:
                     spot = float(tk.fast_info["lastPrice"])
                 except Exception:
                     spot = float(calls["strike"].median())
-            # IV ATM (media de la IV de los 4 strikes mas cercanos al spot en cada lado)
             def _iv_near(dfo):
                 d = dfo.dropna(subset=["impliedVolatility"]).copy()
                 if not len(d):
@@ -1905,14 +1928,7 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                 d["dist"] = (d["strike"] - spot).abs()
                 return float(d.nsmallest(4, "dist")["impliedVolatility"].mean())
             iv_c, iv_p = _iv_near(calls), _iv_near(puts)
-            iv_atm = None
-            if iv_c is not None and iv_p is not None:
-                iv_atm = (iv_c + iv_p) / 2
-            elif iv_c is not None:
-                iv_atm = iv_c
-            elif iv_p is not None:
-                iv_atm = iv_p
-            # SKEW: IV de puts ~5% OTM menos IV de calls ~5% OTM (positivo = pagan por proteccion a la baja)
+            iv_atm = ((iv_c + iv_p) / 2) if (iv_c is not None and iv_p is not None) else (iv_c if iv_c is not None else iv_p)
             skew = None
             try:
                 p_otm = puts.iloc[(puts["strike"] - spot * 0.95).abs().argsort()[:1]]
@@ -1921,19 +1937,8 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                     skew = float(p_otm["impliedVolatility"].iloc[0] - c_otm["impliedVolatility"].iloc[0])
             except Exception:
                 pass
-            # IV percentil aproximado: comparamos la IV ATM contra la vol realizada historica del subyacente
-            iv_pct = None
-            try:
-                if daily and s in daily and daily[s] is not None and iv_atm is not None:
-                    rc = daily[s]["Close"].pct_change().dropna()
-                    if len(rc) > 120:
-                        rv = rc.rolling(21).std() * (252 ** 0.5)          # vol realizada 21d anualizada
-                        rv = rv.dropna()
-                        if len(rv) > 60:
-                            iv_pct = int(round(100 * float((rv < iv_atm).mean())))   # % del tiempo que la RV estuvo por debajo de la IV actual
-            except Exception:
-                pass
-            # MAX PAIN: strike que minimiza el valor intrinseco total de calls+puts en circulacion
+            if iliq:
+                skew = None
             maxpain = None
             try:
                 strikes = sorted(set(calls["strike"]).union(set(puts["strike"])))
@@ -1948,27 +1953,74 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                 maxpain = best
             except Exception:
                 pass
-            # DIVERGENCIA con CMF: flujo positivo + opciones defensivas (put/call alto o skew alto) = alerta
-            cmf = (flow.get(s, {}) or {}).get("cmf")
-            diverg = None
-            if cmf is not None and pcr_vol is not None:
-                if cmf > 0.05 and (pcr_vol > 1.3 or (skew is not None and skew > 0.06)):
-                    diverg = "flujo entra pero compran protección (posible distribución oculta)"
-                elif cmf < -0.05 and pcr_vol < 0.7:
-                    diverg = "flujo sale pero apuestan alcista (posible suelo / manos fuertes)"
             mp_dist = None
             if maxpain and spot:
                 mp_dist = (maxpain / spot - 1) * 100
-                if abs(mp_dist) > 25:            # cadena incompleta o ilíquida: max pain no fiable
+                if abs(mp_dist) > 12:
                     maxpain, mp_dist = None, None
-            out[s] = {"exp": exp0, "pcr_vol": (round(pcr_vol, 2) if pcr_vol else None),
-                      "pcr_oi": (round(pcr_oi, 2) if pcr_oi else None),
-                      "iv": (round(iv_atm * 100, 1) if iv_atm else None),
-                      "iv_pct": iv_pct, "skew": (round(skew * 100, 1) if skew is not None else None),
-                      "maxpain": maxpain, "mp_dist": (round(mp_dist, 1) if mp_dist is not None else None),
-                      "spot": round(spot, 2), "cmf": cmf, "diverg": diverg}
+            return {"exp": exp0, "pcr_vol": pcr_vol, "pcr_oi": pcr_oi, "iv": iv_atm, "skew": skew,
+                    "maxpain": maxpain, "mp_dist": mp_dist, "spot": spot, "iliquido": iliq}
         except Exception:
+            return None
+
+    out = {}
+    for s in symbols[:max_syms]:
+        spot = None
+        try:
+            if daily and s in daily and daily[s] is not None:
+                spot = float(daily[s]["Close"].dropna().iloc[-1])
+        except Exception:
+            pass
+        m = _analiza(s, spot_hint=spot)
+        if m is None:
             continue
+        proxy_lbl = None
+        # --- ETF iliquido con proxy definido: promediar sus acciones grandes ---
+        if m["iliquido"] and s in OPCIONES_PROXY:
+            hijos = []
+            for tkr in OPCIONES_PROXY[s]:
+                h = _analiza(tkr)
+                if h and not h["iliquido"] and h.get("pcr_vol") is not None:
+                    hijos.append((tkr, h))
+            if len(hijos) >= 2:
+                def _media(campo):
+                    vals = [h[campo] for _, h in hijos if h.get(campo) is not None]
+                    return (sum(vals) / len(vals)) if vals else None
+                m = {"exp": hijos[0][1]["exp"], "pcr_vol": _media("pcr_vol"), "pcr_oi": _media("pcr_oi"),
+                     "iv": _media("iv"), "skew": _media("skew"),
+                     "maxpain": None, "mp_dist": None,        # el max pain de una accion no aplica al ETF
+                     "spot": spot, "iliquido": False}
+                proxy_lbl = "+".join(t for t, _ in hijos)
+        # IV percentil: solo con el historial del PROPIO ETF (en modo proxy tambien vale: comparamos
+        # la IV media de sus grandes contra la vol realizada del ETF — aproximacion honesta)
+        iv_pct = None
+        try:
+            if daily and s in daily and daily[s] is not None and m.get("iv") is not None:
+                rc = daily[s]["Close"].pct_change().dropna()
+                if len(rc) > 120:
+                    rv = (rc.rolling(21).std() * (252 ** 0.5)).dropna()
+                    if len(rv) > 60:
+                        iv_pct = int(round(100 * float((rv < m["iv"]).mean())))
+        except Exception:
+            pass
+        cmf = (flow.get(s, {}) or {}).get("cmf")
+        diverg = None
+        pcr_vol, skew = m.get("pcr_vol"), m.get("skew")
+        if cmf is not None and pcr_vol is not None and not m["iliquido"]:
+            if cmf > 0.05 and (pcr_vol > 1.3 or (skew is not None and skew > 0.06)):
+                diverg = "flujo entra pero compran protección (posible distribución oculta)"
+            elif cmf < -0.05 and pcr_vol < 0.7:
+                diverg = "flujo sale pero apuestan alcista (posible suelo / manos fuertes)"
+            if diverg and proxy_lbl:
+                diverg += " — leído en sus acciones grandes, señal de apoyo"
+        out[s] = {"exp": m.get("exp"), "pcr_vol": (round(pcr_vol, 2) if pcr_vol is not None else None),
+                  "pcr_oi": (round(m["pcr_oi"], 2) if m.get("pcr_oi") is not None else None),
+                  "iv": (round(m["iv"] * 100, 1) if m.get("iv") is not None else None),
+                  "iv_pct": iv_pct, "skew": (round(skew * 100, 1) if skew is not None else None),
+                  "maxpain": m.get("maxpain"),
+                  "mp_dist": (round(m["mp_dist"], 1) if m.get("mp_dist") is not None else None),
+                  "spot": (round(m["spot"], 2) if m.get("spot") else None), "cmf": cmf,
+                  "diverg": diverg, "iliquido": m["iliquido"], "proxy": proxy_lbl}
     return out or None
 
 def explicar_opciones(options, flow=None, rrg=None, cartera=None):
@@ -1994,6 +2046,10 @@ def explicar_opciones(options, flow=None, rrg=None, cartera=None):
             frases.append(f"El ETF {est}, {flu}.")
         # 2) que dicen las opciones, en cristiano
         pcr, ivp, sk, mp = o.get("pcr_vol"), o.get("iv_pct"), o.get("skew"), o.get("mp_dist")
+        if o.get("proxy"):
+            frases.append(f"Las opciones del propio ETF apenas se mueven, así que miro las de sus empresas más grandes ({o['proxy'].replace('+', ', ')}) — es una pista de apoyo, no la señal principal.")
+        if o.get("iliquido"):
+            frases.append("Sus opciones se mueven muy poco (mercado ilíquido): no hay lectura fiable aquí, ignóralas y guíate por el flujo de contado.")
         if pcr is not None:
             if pcr > 1.3:
                 frases.append(f"En opciones se compran {pcr:.1f} seguros contra caídas por cada apuesta a subir: hay MIEDO.")
@@ -2013,6 +2069,11 @@ def explicar_opciones(options, flow=None, rrg=None, cartera=None):
         if mp is not None and abs(mp) >= 2:
             frases.append(f"El vencimiento de opciones «tira» del precio hacia un {mp:+.1f}% desde aquí (efecto imán del tercer viernes; se disipa al pasar).")
         # 3) VEREDICTO: el cruce de las dos vias (contado vs opciones), en una frase
+        if o.get("iliquido"):
+            ver, vcol, prio = "— Opciones ilíquidas: aquí no aportan nada, decide solo con el flujo de contado.", "#8FA3C0", 3
+            out.append({"sym": s, "frases": frases, "ver": ver, "vcol": vcol,
+                        "en_cart": s in cartera, "prio": (0 if s in cartera else prio)})
+            continue
         defensivo = bool((pcr is not None and pcr > 1.3) or (sk is not None and sk > 6))
         confiado = bool(pcr is not None and pcr < 0.7)
         if cmf is not None and cmf > 0.05 and defensivo:
@@ -2025,6 +2086,8 @@ def explicar_opciones(options, flow=None, rrg=None, cartera=None):
             ver, vcol, prio = "✗ Dinero saliendo Y miedo en opciones: las dos vías dicen lo mismo — no es tu sitio ahora.", "#F4607A", 1
         else:
             ver, vcol, prio = "— Sin lectura clara: las opciones no añaden nada al flujo esta semana.", "#8FA3C0", 3
+        if o.get("proxy") and prio <= 2:
+            ver += " (Leído en sus acciones grandes, no en el ETF: tómalo como apoyo, la señal que manda es el flujo.)"
         out.append({"sym": s, "frases": frases, "ver": ver, "vcol": vcol,
                     "en_cart": s in cartera, "prio": (0 if s in cartera else prio)})
     out.sort(key=lambda x: (x["prio"], x["sym"]))
@@ -3508,7 +3571,7 @@ def run_ia_auto(snap, fecha):
         print("  IA automatica: SIN key (crea ia_key.txt junto al script para activarla)")
         return None
     print("  IA automatica: key encontrada, consultando al proveedor ...")
-    quiero = ["gestor"] + [k for k in (IA_AUTO_EXTRA or []) if k != "gestor"]
+    quiero = ["resumen"] + [k for k in (IA_AUTO_EXTRA or []) if k != "resumen"]
     pmap = {k: (t, p) for k, t, p in IA_PROMPTS}
     out = {}
     for k in quiero:
@@ -7909,6 +7972,9 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                 _mptxt = (f"{_o['maxpain']:g} ({_mp:+.1f}%)" if _o.get("maxpain") and _mp is not None else "—")
                 _dv = _o.get("diverg")
                 _dvtxt = (f"<span style='color:{AMB}'>⚠ {esc(_dv[:38])}</span>" if _dv else "")
+                _pxl = _o.get("proxy")
+                if _pxl:
+                    _dvtxt = f"<span style='color:{CYN};font-size:9px'>vía {esc(_pxl)}</span> " + _dvtxt
                 od += (f"<tr><td><b style='color:{CYN}'>{_s}</b></td>"
                        f"<td style='color:{_pcc}'>{_pcr if _pcr is not None else '—'}</td>"
                        f"<td style='color:{GRY}'>{_o.get('pcr_oi') if _o.get('pcr_oi') is not None else '—'}</td>"
@@ -8624,7 +8690,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
         # --- PANEL DE IA AUTOMATICA: la respuesta del maestro, generada EN ESTE BUILD ---
         try:
             if ia_auto:
-                for _k in (["gestor"] + [x for x in (IA_AUTO_EXTRA or []) if x != "gestor"]):
+                for _k in (["resumen"] + [x for x in (IA_AUTO_EXTRA or []) if x != "resumen"]):
                     _r = ia_auto.get(_k)
                     if not _r:
                         continue
@@ -9062,6 +9128,29 @@ def main():
             f"{s3} {n3:+.1f}%" for s3, n3 in sorted(_noct_ia, key=lambda x: -(x[1] or 0))[:5]) + "."
     if _dix:
         _snap_main += f"\nDIX dark pools: {_dix['m5']}% media 5d ({_dix['senal']}, percentil {_dix['pct']} del año)."
+    # --- piezas nuevas para que el resumen las vea: opciones, calendario tau, analogos y eventos con fecha ---
+    if tau:
+        _snap_main += (f"\nCALENDARIO tau (ciclo intramensual de momentum): estado {tau['estado']}. "
+                       f"Ventana de presion vendedora sobre losers {tau['win_ini']}-{tau['win_fin']}; "
+                       f"zona de rebote {tau['reb_ini']}-{tau['reb_fin']}.")
+    if analogos:
+        _a3 = analogos.get("m3", {})
+        _snap_main += (f"\nANALOGOS historicos desde {analogos.get('desde')}: en las {analogos.get('n')} situaciones mas parecidas "
+                       f"a hoy, a 3 meses el mercado acabo positivo el {_a3.get('pos')}% de las veces "
+                       f"(mediana {_a3.get('med')}%). Es frecuencia historica, no prediccion.")
+    if options:
+        _div = [f"{s} ({o['diverg']})" for s, o in options.items() if o.get("diverg")]
+        _mied = [s for s, o in options.items() if o.get("pcr_vol") and o["pcr_vol"] > 1.3 and not o.get("iliquido")]
+        if _div:
+            _snap_main += "\nOPCIONES - divergencias con el flujo de contado: " + "; ".join(_div[:8]) + "."
+        if _mied:
+            _snap_main += "\nOPCIONES - miedo/proteccion (put/call alto, liquido): " + ", ".join(_mied[:8]) + "."
+    try:
+        _ev = [f"{f}: {t}" for f, t in (EVENTOS_MERCADO or []) if dt.date.fromisoformat(f) >= dt.date.today() - dt.timedelta(days=1)]
+        if _ev:
+            _snap_main += "\nEVENTOS CON FECHA proximos: " + " | ".join(_ev[:6]) + "."
+    except Exception:
+        pass
     ai_text = ai_commentary(_snap_main)
     ia_auto = run_ia_auto(_snap_main, str(df.index[-1].date()))
     if ai_text:
