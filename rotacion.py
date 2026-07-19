@@ -2057,6 +2057,95 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
         print(f"  iv rank: {_e_iv}")
     return out or None
 
+def _vd_card(v):
+    """Tarjeta compacta de un veredicto: ETF, las tres vías como chips, la frase en cristiano."""
+    _dir_col = {"COMPRAR": "#2FD08A", "VENDER": "#F4607A"}.get(str(v.get("dir", "")).split()[0] if v.get("dir") else "", "#8FA3C0")
+    _tag = " <span style='font-size:9px;color:#5B8CFF'>EN CARTERA</span>" if v.get("en_cart") else ""
+    _chips = (f"<span style='font-size:9.5px;color:#8FA3C0;background:#0A1220;border-radius:4px;padding:1px 6px;margin-right:3px'>RRG: {esc(v['via_rrg'])}</span>"
+              f"<span style='font-size:9.5px;color:#8FA3C0;background:#0A1220;border-radius:4px;padding:1px 6px;margin-right:3px'>flujo: {esc(v['via_flujo'])}</span>"
+              f"<span style='font-size:9.5px;color:#8FA3C0;background:#0A1220;border-radius:4px;padding:1px 6px'>{esc(v['via_opc'])}</span>")
+    return (f"<div style='margin:5px 0;padding:9px 12px;background:#0E1626;border-left:3px solid {v['cl_col']};border-radius:8px'>"
+            f"<div style='display:flex;justify-content:space-between;align-items:center'>"
+            f"<div><b style='color:#E6EDF6;font-size:13px'>{v['sym']}</b>{_tag} "
+            f"<span style='font-size:10px;color:{_dir_col};font-weight:700'>{esc(str(v.get('dir','')))}</span></div>"
+            f"<div style='font-size:9px;color:{v['cl_col']}'>{esc(v['claridad'])} · {v['score']}/100</div></div>"
+            f"<div style='margin:4px 0 3px'>{_chips}</div>"
+            f"<div style='font-size:12px;color:#C9D6EA;line-height:1.55'>{esc(v['frase'])}</div></div>")
+
+def veredicto_unico(fichas, options=None):
+    """VEREDICTO ÚNICO: coge cada ficha (que YA cruza flujo+RRG+opciones+suelos+centinela+correlación+
+    coherencia+póker+τ) y la resume en UNA sola línea en cristiano, más una etiqueta de claridad de señal.
+    Ordena todo el universo de mayor a menor claridad. Es la vista de 'una mirada y lo entiendo todo'."""
+    if not fichas:
+        return None
+    opt = options or {}
+    out = []
+    for f in fichas:
+        s = f["sym"]
+        direc = f.get("dir", f.get("direc", "ESPERAR"))
+        score = f.get("score", 50)
+        quad = f.get("quad", "")
+        flu = f.get("flu_lbl", "neutro")
+        o = opt.get(s, {})
+        # --- las tres vías, cada una en una palabra ---
+        via_rrg = {"leading": "líder", "improving": "mejorando", "weakening": "perdiendo fuerza",
+                   "lagging": "rezagado"}.get(quad, "—")
+        via_flujo = {"ENTRANDO": "entra dinero", "SALIENDO": "sale dinero", "neutro": "dinero quieto"}.get(flu, "—")
+        if o.get("iliquido"):
+            via_opc = "opciones sin lectura fiable"
+        elif o.get("diverg") and "protección" in o["diverg"]:
+            via_opc = "pero se cubren en opciones"
+        elif o.get("diverg") and "suelo" in o["diverg"]:
+            via_opc = "y en opciones apuestan al alza"
+        elif o.get("pcr_vol") is not None and o["pcr_vol"] > 1.3:
+            via_opc = "miedo en opciones"
+        elif o.get("pcr_vol") is not None and o["pcr_vol"] < 0.7:
+            via_opc = "confianza en opciones"
+        else:
+            via_opc = "opciones neutras"
+        # --- coinciden las vías o se contradicen ---
+        alcista_flujo = flu == "ENTRANDO"
+        defensivo_opc = bool(o.get("diverg") and "protección" in o.get("diverg", ""))
+        alcista_rrg = quad in ("leading", "improving")
+        contradiccion = (alcista_flujo and defensivo_opc)
+        # --- frase única en cristiano según la dirección del sistema ---
+        if direc == "VENDER":
+            frase = f"Toca salir: {via_rrg}, {via_flujo}. El sistema lo saca de la cartera."
+            claridad, cl_col, orden = "SEÑAL CLARA", "#F4607A", 0
+        elif direc.startswith("COMPRAR"):
+            frase = f"Todo a favor: {via_rrg}, {via_flujo} y {via_opc}. La entrada más limpia."
+            claridad, cl_col, orden = "SEÑAL CLARA", "#2FD08A", 0
+        elif contradiccion:
+            frase = f"Ojo: {via_rrg} y {via_flujo}, {via_opc}. Suben con una mano y se cubren con la otra — si estás dentro, con stop; si no, no es entrada limpia."
+            claridad, cl_col, orden = "SEÑAL MIXTA", "#F4B740", 1
+        elif o.get("diverg") and "suelo" in o.get("diverg", ""):
+            frase = f"Posible suelo: {via_flujo} pero en opciones apuestan al alza. A veces es la huella de manos fuertes. Vigilar, no perseguir."
+            claridad, cl_col, orden = "A VIGILAR", "#4CC2E0", 2
+        elif f.get("veto_coh") or (f.get("concl", "").startswith("Lo frena su tema espejo")):
+            frase = f"Su gráfico va bien pero lo frena su tema espejo en EE.UU. No fiarse de la fuerza local hasta que el espejo mejore."
+            claridad, cl_col, orden = "A VIGILAR", "#4CC2E0", 2
+        elif alcista_rrg and alcista_flujo:
+            frase = f"Bien pero en espera: {via_rrg}, {via_flujo}, {via_opc}. Lo frena el mercado, no él. Mantener sin añadir."
+            claridad, cl_col, orden = "EN ESPERA", "#8FA3C0", 3
+        elif quad == "lagging" and not alcista_flujo:
+            frase = f"Fuera de juego: {via_rrg}, {via_flujo}. Nada que hacer aquí ahora."
+            claridad, cl_col, orden = "EVITAR", "#6B7B94", 4
+        else:
+            frase = f"Sin señal fuerte: {via_rrg}, {via_flujo}, {via_opc}. Esperar a que se defina."
+            claridad, cl_col, orden = "EN ESPERA", "#8FA3C0", 3
+        # nota de póker (rebote táctico), si la hay
+        pk = f.get("poker")
+        extra = ""
+        if pk is not None and pk >= 7:
+            extra = f" · 🎰 rebote táctico {pk}/10 (aparte de la rotación, en contado)"
+        out.append({"sym": s, "en_cart": f.get("en_cart"), "dir": direc, "score": score,
+                    "via_rrg": via_rrg, "via_flujo": via_flujo, "via_opc": via_opc,
+                    "frase": frase + extra, "claridad": claridad, "cl_col": cl_col,
+                    "orden": (0 if f.get("en_cart") else orden + 1)})
+    # cartera primero, luego por claridad de señal (0=más clara), y dentro por score
+    out.sort(key=lambda x: (x["orden"], -x["score"]))
+    return out or None
+
 def explicar_opciones(options, flow=None, rrg=None, cartera=None):
     """Traduce el OPTIONS DESK a LENGUAJE LLANO, ETF a ETF, cruzado con el flujo (CMF) y el cuadrante RRG.
     Analogia unica en todo el texto: un PUT es un SEGURO contra caidas; un CALL es una APUESTA a subir;
@@ -2084,8 +2173,11 @@ def explicar_opciones(options, flow=None, rrg=None, cartera=None):
             frases.append(f"Las opciones del propio ETF apenas se mueven, así que miro las de sus empresas más grandes ({o['proxy'].replace('+', ', ')}) — es una pista de apoyo, no la señal principal.")
         if o.get("iliquido"):
             frases.append("Sus opciones se mueven muy poco (mercado ilíquido): no hay lectura fiable aquí, ignóralas y guíate por el flujo de contado.")
+        _combo = (pcr is not None and pcr < 0.7 and sk is not None and sk > 6)
         if pcr is not None:
-            if pcr > 1.3:
+            if _combo:
+                frases.append(f"Se compran pocos seguros ({pcr:.1f} por apuesta alcista), pero los pocos que se compran se pagan CAROS y contra caídas: confianza en la superficie, cobertura discreta por debajo.")
+            elif pcr > 1.3:
                 frases.append(f"En opciones se compran {pcr:.1f} seguros contra caídas por cada apuesta a subir: hay MIEDO.")
             elif pcr < 0.7:
                 frases.append(f"Casi nadie compra seguro (solo {pcr:.1f} por apuesta alcista): CONFIANZA, a veces exceso de ella.")
@@ -2102,7 +2194,7 @@ def explicar_opciones(options, flow=None, rrg=None, cartera=None):
                 frases.append("El seguro está caro incluso para lo habitual (y el seguro casi siempre cuesta más que el movimiento real): esperan algo gordo.")
             elif ivp <= 20:
                 frases.append("El seguro está barato: nadie espera sustos a corto plazo.")
-        if sk is not None and sk > 6:
+        if sk is not None and sk > 6 and not _combo:
             frases.append("Además pagan un EXTRA por protegerse de caídas concretamente (no de subidas): temen el lado de abajo.")
         elif sk is not None and sk < 0:
             frases.append("Curioso: la apuesta a subir cuesta MÁS que el seguro — apetito alcista poco habitual.")
@@ -2452,6 +2544,7 @@ def compute_fichas(df, daily, rrg, flow, scores, suelo, centinela, plan, chosen,
                            "rel1": g.get("rel1"), "rel4": g.get("rel4"), "abs13": sc.get("abs_mom"),
                            "prob": prob, "favor": favor[:5], "contra": contra[:3], "concl": concl,
                            "en_cart": en_cart, "suelo": es_suelo, "lider_temp": lider_temp,
+                           "veto_coh": bool(veto_coh),
                            "poker": (poker_by.get(s, {}).get("pts") if s in poker_by else None)})
         # --- deduplicacion: gemelos fijos + correlacion semanal > .92 -> un solo representante ---
         grupo_de = {}
@@ -5261,6 +5354,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
         "<button class='viewtab mainview' onclick=\"mainView('bbg',this)\" style='font-size:13px;padding:7px 16px;border-color:#FFB00055;color:#FFB000'>🖥️ PRO</button>"
         "<button class='viewtab mainview' onclick=\"mainView('rds',this)\" style='font-size:13px;padding:7px 16px;border-color:#4CC2E055;color:#4CC2E0'>📣 Redes</button>"
         "<button class='viewtab mainview' onclick=\"mainView('cl',this)\" style='font-size:13px;padding:7px 16px'>🤖 Modo Claude</button>"
+        "<button class='viewtab mainview' onclick=\"mainView('vd',this)\" style='font-size:13px;padding:7px 16px;border-color:#4CC2E055;color:#4CC2E0'>⚖️ Veredicto</button>"
         "<button class='viewtab mainview' onclick=\"mainView('news',this)\" style='font-size:13px;padding:7px 16px;border-color:#2FD08A55;color:#2FD08A'>📰 News</button>"
         "<span style='flex:1'></span>"
         "<button class='viewtab' onclick='descargarPDF()' title='Resumen semanal en PDF (imprimible / para Substack)' style='font-size:12px;padding:7px 12px;border-color:#5B8CFF55;color:#5B8CFF'>📄 Resumen PDF</button>"
@@ -8812,6 +8906,47 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
     except Exception:
         html.append("<div id='vista-cl' style='display:none'></div>")
 
+    # ===== V-VEREDICTO — las tres vías (flujo+RRG+opciones) fundidas en una línea por ETF =====
+    try:
+        html.append("<div id='vista-vd' style='display:none'>")
+        _vd = veredicto_unico(_fichas if "_fichas" in dir() else None, options=options)
+        if _vd:
+            # leyenda de claridad
+            html.append("<div class='panel full' style='border-color:#4CC2E055'>"
+                        "<h2>⚖️ VEREDICTO — todo cruzado, en una línea por ETF</h2>"
+                        "<div class='note'>Aquí se juntan las tres vías que mira el terminal — el <b>dinero de contado</b> (flujo/CMF), "
+                        "la <b>fuerza relativa</b> (si es líder o rezagado) y las <b>opciones</b> (miedo o confianza) — y te doy un veredicto "
+                        "en cristiano por cada ETF. Ordenado por claridad: primero lo tuyo, luego las señales más claras, al final lo dudoso. "
+                        "Cuando las tres vías coinciden, la señal es fuerte; cuando se contradicen, el aviso lo dice. "
+                        "Esto es el mismo motor de la pestaña Operativa, resumido para leer de un vistazo. No es asesoramiento.</div>")
+            # agrupar por claridad
+            _grupos, _orden_g = {}, []
+            for _v in _vd:
+                g = _v["claridad"]
+                if g not in _grupos:
+                    _grupos[g] = []; _orden_g.append(g)
+                _grupos[g].append(_v)
+            _cart = [_v for _v in _vd if _v["en_cart"]]
+            if _cart:
+                html.append("<div style='font-size:11px;color:#5B8CFF;text-transform:uppercase;letter-spacing:1px;margin:8px 0 4px'>⭐ Tu cartera</div>")
+                for _v in _cart:
+                    html.append(_vd_card(_v))
+            for g in _orden_g:
+                _items = [x for x in _grupos[g] if not x["en_cart"]]
+                if not _items:
+                    continue
+                _gc = _items[0]["cl_col"]
+                html.append(f"<div style='font-size:11px;color:{_gc};text-transform:uppercase;letter-spacing:1px;margin:12px 0 4px'>{esc(g)}</div>")
+                for _v in _items:
+                    html.append(_vd_card(_v))
+            html.append("</div>")
+        else:
+            html.append("<div class='panel full'><h2>⚖️ VEREDICTO</h2><div class='note'>Se genera con las fichas de Operativa; ejecuta con datos para verlo.</div></div>")
+        html.append("</div>")
+    except Exception as _e_vd:
+        print(f"  vista veredicto: {_e_vd}")
+        html.append("<div id='vista-vd' style='display:none'></div>")
+
     # ===== V-NEWS — solo noticias/catalizadores CON FECHA que mueven las posiciones =====
     try:
         html.append("<div id='vista-news' style='display:none'>")
@@ -9022,6 +9157,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                 "var bg=document.getElementById('vista-bbg');if(bg)bg.style.display=(v=='bbg')?'contents':'none';"
                 "var rd=document.getElementById('vista-rds');if(rd)rd.style.display=(v=='rds')?'contents':'none';"
                 "var cl=document.getElementById('vista-cl');if(cl)cl.style.display=(v=='cl')?'contents':'none';"
+                "var vd=document.getElementById('vista-vd');if(vd)vd.style.display=(v=='vd')?'contents':'none';"
                 "var nw=document.getElementById('vista-news');if(nw)nw.style.display=(v=='news')?'contents':'none';"
                 "document.querySelectorAll('.mainview').forEach(function(x){x.classList.remove('active')});b.classList.add('active');window.scrollTo(0,0);}</script>")
     html.append("</main>")
