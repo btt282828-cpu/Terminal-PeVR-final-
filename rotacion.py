@@ -757,7 +757,17 @@ def ensure(pkg, imp=None, optional=False):
 
 print("Preparando librerias...")
 pd = ensure("pandas")
-yf = ensure("yfinance", optional=True)
+# --- yfinance: scraper NO oficial que Yahoo rompe periodicamente. En GitHub Actions cada build
+#     instala la ULTIMA version: un release roto un martes cambia el terminal sin tocar nada.
+#     YF_PIN fija una version probada (p.ej. "yfinance==0.2.66"); vacio = ultima (comportamiento
+#     antiguo). La version usada se imprime SIEMPRE para poder correlacionar builds raros. ---
+YF_PIN = ""
+yf = ensure(YF_PIN or "yfinance", imp="yfinance", optional=True)
+try:
+    if yf is not None:
+        print(f"  yfinance {yf.__version__}" + ("  (pin activo)" if YF_PIN else "  (SIN pin: ultima version — considera fijar YF_PIN)"))
+except Exception:
+    pass
 requests = ensure("requests")
 import pandas as pd  # noqa
 from io import StringIO
@@ -785,6 +795,9 @@ def fetch_stooq(sym, start, end):
         return None
 
 def fetch_yahoo(sym, start, end):
+    # NOTA auto_adjust=True: los cierres van AJUSTADOS por dividendos/splits (correcto para retornos
+    # y flujo). Si validas a mano contra la web de Yahoo veras diferencias crecientes hacia atras:
+    # no es un error, es el Adjusted Close. Los niveles absolutos de indices usan auto_adjust=False.
     if yf is None:
         return None
     try:
@@ -796,7 +809,10 @@ def fetch_yahoo(sym, start, end):
             df.columns = df.columns.get_level_values(0)
         cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
         return df[cols].sort_index()
-    except Exception:
+    except Exception as e:
+        # mensaje SIN el simbolo a proposito: _avisar agrupa avisos identicos con contador, asi un
+        # rate-limit masivo sale como "descarga fallida ×40" y no inunda el panel de salud
+        _avisar("yahoo", f"descarga fallida: {type(e).__name__}")
         return None
 
 def cache_path(sym):
@@ -1003,23 +1019,72 @@ def topup_recent(sym, d, end):
         newer = y[cols][y.index > last]
         if newer.empty:
             return d, 0
+        # GUARDIA DE ESCALA (la misma de refrescar_con_yahoo, que aqui faltaba): si Yahoo devuelve otra
+        # escala (ticker mal interpretado, serie ajustada vs sin ajustar tras un split), concatenar
+        # corromperia CMF/OBV/retornos con un salto ficticio. Solo se añade si el primer dato nuevo
+        # esta a <25% del ultimo de la base (misma escala, movimiento de 1-2 sesiones plausible).
+        try:
+            _ratio = float(newer["Close"].iloc[0]) / float(d["Close"].dropna().iloc[-1])
+            if not (0.8 <= _ratio <= 1.25):
+                _avisar(f"topup.{sym}", f"refresco Yahoo DESCARTADO: escala incompatible con Stooq (ratio {_ratio:.2f}); la serie sigue 1 sesion vieja")
+                return d, 0
+        except Exception:
+            return d, 0
         d = pd.concat([d, newer]).sort_index()
         d = d[~d.index.duplicated(keep="last")]
         return d, len(newer)
     except Exception:
         return d, 0
 
+def _ohlcv_valido(sym, d, fuente):
+    """Validacion ESTRUCTURAL de lo descargado antes de aceptarlo: cierres > 0, High >= Low,
+    fechas sin duplicar y sin huecos groseros. Si la fuente devuelve barras corruptas (pasa con
+    splits mal procesados), se descarta y se prueba la siguiente fuente en vez de tragarselo."""
+    try:
+        c = d["Close"].dropna()
+        if not len(c) or (c <= 0).any():
+            _avisar(f"valida.{sym}", f"{fuente}: cierres <= 0 o serie vacia — fuente descartada, se prueba la siguiente")
+            return False
+        if {"High", "Low"}.issubset(d.columns):
+            hl = d[["High", "Low"]].dropna()
+            if len(hl) and (hl["High"] < hl["Low"]).any():
+                _avisar(f"valida.{sym}", f"{fuente}: barras con High < Low (datos corruptos) — fuente descartada")
+                return False
+        if d.index.duplicated().any():
+            _avisar(f"valida.{sym}", f"{fuente}: fechas duplicadas en la serie (revisar)")
+        ses = len(pd.bdate_range(d.index[0], d.index[-1]))
+        if ses and len(d) < ses * 0.85:
+            _avisar(f"valida.{sym}", f"{fuente}: posibles huecos ({len(d)} barras de ~{ses} sesiones esperadas)")
+    except Exception:
+        pass
+    return True
+
 def get_ohlcv(sym, start, end):
     pairs = ([(fetch_yahoo, "yahoo"), (fetch_stooq, "stooq")] if DATA_PRIMARY == "yahoo"
              else [(fetch_stooq, "stooq"), (fetch_yahoo, "yahoo")])
     for fn, nm in pairs:
         d = fn(sym, start, end)
-        if d is not None and len(d) >= 30:
+        if d is not None and len(d) >= 30 and _ohlcv_valido(sym, d, nm):
             save_cache(sym, d)
             return d, nm
+    # --- FALLBACK A CACHE: antes era SILENCIOSO y sin limite de edad (un rate-limit de Yahoo podia
+    #     pintar el dashboard entero con precios de hace semanas sin una sola señal visual). Ahora:
+    #     se mide la edad en sesiones, se avisa al panel de salud y a partir de 5 sesiones el simbolo
+    #     se EXCLUYE — mejor ausente que viejo disfrazado de fresco. ---
     c = load_cache(sym)
     if c is not None:
-        return c, "cache"
+        try:
+            edad = max(0, len(pd.bdate_range(c.index[-1].date(), dt.date.today())) - 1)
+        except Exception:
+            edad = 0
+        if edad > 5:
+            _avisar(f"datos.{sym}", f"sin fuente viva y cache de hace {edad} sesiones: simbolo EXCLUIDO del build")
+            return None, "—"
+        if edad >= 1:
+            _avisar(f"datos.{sym}", f"Yahoo y Stooq sin respuesta: usando CACHE con {edad} sesion(es) de retraso — las señales de este simbolo van viejas")
+        else:
+            _avisar(f"datos.{sym}", "Yahoo y Stooq sin respuesta: usando CACHE guardada hoy")
+        return c, (f"cache-{edad}d" if edad else "cache")
     return None, "—"
 
 def to_weekly_close(series):
@@ -1059,14 +1124,53 @@ def download_all():
         sources[sym] = src
         print(f"  {sym:5s}  {src:9s}  {len(weekly[sym])} semanas  ult {weekly[sym].index[-1].date()}")
         time.sleep(0.25)   # cortesia con la fuente
-    # alinear: union de fechas + ffill para que un solo simbolo rezagado no arrastre a todos
+    # alinear: union de fechas + arrastre LIMITADO A 1 SEMANA. El ffill sin limite fabricaba cierres
+    # (un simbolo caido semanas mostraba 0% de movimiento ficticio en el RRG). Ahora: 1 semana de
+    # arrastre como maximo (avisado), y si ni con esas tiene dato reciente, el simbolo se EXCLUYE.
     df = pd.DataFrame(weekly).sort_index()
     if df.shape[1] > 0:
         min_obs = max(30, int(0.7 * df.shape[0]))
         df = df.dropna(axis=1, thresh=min_obs)
-    df = df.ffill().dropna()
+    _antes = df.copy()
+    df = df.ffill(limit=1)
+    try:
+        _rell = {c: int((_antes[c].iloc[-8:].isna() & df[c].iloc[-8:].notna()).sum()) for c in df.columns}
+        _rell = {c: n for c, n in _rell.items() if n}
+        if _rell:
+            _avisar("panel.semanal", "cierre semanal ARRASTRADO 1 sem (sin dato esa semana) en: "
+                    + ", ".join(f"{c}×{n}" for c, n in sorted(_rell.items())))
+    except Exception:
+        pass
+    _colgados = [c for c in df.columns if df[c].iloc[-min(len(df), 6):].isna().any()]
+    if _colgados:
+        for c in _colgados:
+            _avisar(f"datos.{c}", "sin cierre semanal reciente ni con arrastre de 1 sem: EXCLUIDO del panel semanal")
+        df = df.drop(columns=_colgados)
+    df = df.dropna()
     if len(df) > WEEKS:
         df = df.iloc[-WEEKS:]
+    # --- VERIFICACION CRUZADA (centinela): el ultimo cierre COMUN de SPY por la fuente secundaria.
+    #     Dos fuentes independientes y no se cotejaban nunca: este es el unico chequeo automatico real
+    #     de "¿coincide con lo publicado?" posible sin fuente de pago. Tolerancia 1.5% (ajuste por
+    #     dividendos de Yahoo puede desviar fechas antiguas; el ultimo cierre comun debe cuadrar). ---
+    try:
+        if BENCH in daily and daily[BENCH] is not None:
+            _src_b = str(sources.get(BENCH, ""))
+            _sec = (fetch_stooq(BENCH, end - dt.timedelta(days=45), end) if _src_b.startswith("yahoo")
+                    else fetch_yahoo(BENCH, end - dt.timedelta(days=60), end))
+            if _sec is not None and "Close" in _sec.columns:
+                _a = daily[BENCH]["Close"].dropna(); _b = _sec["Close"].dropna()
+                _com = _a.index.intersection(_b.index)
+                if len(_com):
+                    _f = _com[-1]
+                    _dif = abs(float(_a.loc[_f]) / float(_b.loc[_f]) - 1) * 100
+                    if _dif > 1.5:
+                        _avisar("verifica.SPY", f"Yahoo y Stooq DISCREPAN un {_dif:.1f}% en el cierre del {_f.date()}: "
+                                                "no te fies de las señales de hoy sin mirar el precio en el broker")
+                    else:
+                        print(f"  verificacion cruzada SPY ({_f.date()}): fuentes coinciden (dif {_dif:.2f}%)")
+    except Exception:
+        pass
     used = [v for v in sources.values() if v not in ("—",)]
     if used and not any("stooq" in v for v in used):
         print("  AVISO: Stooq no respondio en ninguna descarga (probable LIMITE DIARIO de Stooq por su IP, "
@@ -1212,7 +1316,10 @@ def compute_volume_flow(daily, only=None):
             continue
         close = dd["Close"]; vol = dd["Volume"].astype(float)
         obv = (np.sign(close.diff().fillna(0)) * vol).cumsum()
-        cmf = 0.0
+        # CMF: None = NO CALCULABLE (sin High/Low o sin volumen). Antes se dejaba en 0.0 y salia al
+        # terminal como "Neutro" medido — un dato ausente disfrazado de flujo neutro. Ahora el hueco
+        # se declara (N/D) y los consumidores ya comprueban `cmf is not None` en todo el script.
+        cmf = None
         if {"High", "Low"}.issubset(dd.columns):
             hi, lo = dd["High"], dd["Low"]
             rng = (hi - lo).replace(0, np.nan)
@@ -1221,9 +1328,10 @@ def compute_volume_flow(daily, only=None):
             adl = mfv.cumsum()
             win = min(20, len(dd))                      # CMF de 20 sesiones (Chaikin Money Flow)
             vsum = vol.iloc[-win:].sum()
-            cmf = float(mfv.iloc[-win:].sum() / vsum) if vsum else 0.0
+            cmf = float(mfv.iloc[-win:].sum() / vsum) if vsum else None
         else:
             adl = obv
+            _avisar(f"flow.{sym}", "sin columnas High/Low: CMF no calculable — se marca N/D (antes salia 0.0 como si fuera neutro real)")
         # OBV vs su propia media (EMA ~50 sesiones = 10 semanas): tendencia y cruce reciente
         obv_ema = obv.ewm(span=50, min_periods=10).mean()
         obv_above = bool(obv.iloc[-1] > obv_ema.iloc[-1]) if obv_ema.notna().any() else False
@@ -1280,7 +1388,7 @@ def compute_volume_flow(daily, only=None):
                 if len(_gap.dropna()) >= 15:
                     noct20 = round(float(_gap.dropna().sum()) * 100, 1)
                     ses20 = round(float(_ses.dropna().sum()) * 100, 1)
-                    if sym in FLUJO_NOCTURNO_SYMS and noct20 >= FLUJO_NOCTURNO_MIN and cmf <= 0:
+                    if sym in FLUJO_NOCTURNO_SYMS and noct20 >= FLUJO_NOCTURNO_MIN and cmf is not None and cmf <= 0:
                         acum_ext = True
         except Exception:
             pass
@@ -1297,18 +1405,18 @@ def compute_volume_flow(daily, only=None):
         except Exception:
             pass
         diverg = None
-        if price_t > 0.5 and flow < -0.5 and cmf < -0.05:
+        if cmf is not None and price_t > 0.5 and flow < -0.5 and cmf < -0.05:
             diverg = "distribucion oculta"   # precio sube pero sale dinero (CMF claramente negativo) -> aviso
-        elif price_t < -0.5 and flow > 0.5 and cmf > 0.05:
+        elif cmf is not None and price_t < -0.5 and flow > 0.5 and cmf > 0.05:
             diverg = "acumulacion oculta"     # precio baja pero entra dinero (CMF claramente positivo) -> temprano
         # margen anti-confusion: si el CMF esta pegado a cero (-0.05..+0.05), NO se marca divergencia
         # (dos indicadores discrepando con dinero neto ~0 es ruido, no senal)
         # etiqueta de flujo derivada DIRECTAMENTE del CMF (el mismo numero de las tablas), para que todo el
         # panel diga lo mismo: nunca "Neutro" en un sitio y "-0.06" en otro. El OBV/ADL se sigue usando aparte
         # para la 'distribucion oculta' (diverg), que es la senal fuerte.
-        label = "Acumulacion" if cmf > 0.05 else "Distribucion" if cmf < -0.05 else "Neutro"
+        label = ("Acumulacion" if cmf > 0.05 else "Distribucion" if cmf < -0.05 else "Neutro") if cmf is not None else "N/D"
         out[sym] = {"flow": round(flow, 2), "label": label, "diverg": diverg,
-                    "cmf": round(cmf, 3), "cmf_pos": bool(cmf > 0),
+                    "cmf": (round(cmf, 3) if cmf is not None else None), "cmf_pos": bool(cmf is not None and cmf > 0),
                     "obv_above": obv_above, "obv_cross": obv_cross,
                     "vol_rel": vol_rel, "vol_break": vol_break, "vol_rel5": vol_rel5,
                     "clima": clima, "zday": (round(zday, 1) if zday is not None else None),
@@ -1949,6 +2057,20 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
         return None
     hoy = pd.Timestamp.today().normalize()
     flow = flow or {}
+    # --- FASE DE SESION: el campo 'volume' de Yahoo se resetea cada dia. Un build antes o durante la
+    #     sesion USA lee volumen PARCIAL (por la manyana europea, ~0): el PCR-vol es provisional y el
+    #     ETF puede parecer iliquido sin serlo. Se avisa y el disparo de proxy pasa a exigir que
+    #     TAMBIEN falle el OI (que es T-1 y si es estable a cualquier hora). ---
+    vol_parcial = False
+    try:
+        from zoneinfo import ZoneInfo
+        _ny = dt.datetime.now(ZoneInfo("America/New_York"))
+        if _ny.weekday() < 5 and _ny.hour < 16:
+            vol_parcial = True
+            _avisar("options", f"build a las {_ny:%H:%M} NY (sesion USA no cerrada): volumen de opciones PARCIAL — "
+                               "el PCR-vol de hoy es provisional; fiate mas del PCR-OI (T-1). El build 'bueno' es el del cierre")
+    except Exception:
+        pass
 
     def _analiza(tkr, spot_hint=None):
         """Analiza la cadena de UN ticker. Devuelve dict con metricas crudas o None."""
@@ -1976,28 +2098,75 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
             if pcr_oi is not None and pcr_oi > 3.5:
                 pcr_oi = None
             iliq = not (_liq_vol or _liq_oi)
+            # --- SPOT: cierre diario (hint) -> fast_info validado -> NADA. Jamas se inventa: el antiguo
+            #     fallback a la mediana de strikes podia desviarse 5-15% y contaminaba ATM, skew y max pain.
             spot = spot_hint
             if spot is None:
                 try:
-                    spot = float(tk.fast_info["lastPrice"])
+                    _fp = float(tk.fast_info["lastPrice"])
+                    spot = _fp if _fp > 0 else None
                 except Exception:
-                    spot = float(calls["strike"].median())
-            def _iv_near(dfo):
+                    spot = None
+            if spot is None or spot <= 0:
+                _avisar(f"options.{tkr}", "sin spot fiable (ni cierre diario ni fast_info): cadena NO analizada para no inventar el ATM")
+                return None
+            # --- IV y SKEW sobre el vencimiento mas cercano a ~30 dias (tenor ESTABLE): el primer
+            #     vencimiento >=5d salta de semana en semana y mezclaba en options_iv.json IVs de 5, 9 y
+            #     12 dias — el IV rank comparaba peras con manzanas por la estructura temporal de vol. ---
+            exp_iv = min(futuras, key=lambda e: abs((pd.Timestamp(e) - hoy).days - 30))
+            dte_iv = int((pd.Timestamp(exp_iv) - hoy).days)
+            calls_iv, puts_iv = calls, puts
+            if exp_iv != exp0:
+                try:
+                    ch2 = tk.option_chain(exp_iv)
+                    if ch2.calls is not None and len(ch2.calls) and ch2.puts is not None and len(ch2.puts):
+                        calls_iv, puts_iv = ch2.calls, ch2.puts
+                    else:
+                        exp_iv, dte_iv = exp0, int((pd.Timestamp(exp0) - hoy).days)
+                except Exception:
+                    exp_iv, dte_iv = exp0, int((pd.Timestamp(exp0) - hoy).days)
+            def _calidad(dfo):
+                """Strikes con cotizacion VIVA. Etapa 1: bid y ask > 0 e IV plausible. Fuera de horario
+                Yahoo pone bid/ask a 0 en muchas cadenas: etapa 2 relaja bid/ask pero exige cruce
+                reciente (<=5d) e IV en rango. Sin este filtro, un strike zombi con IV de hace dias
+                (a veces 200-500%) entraba en la media ATM y la desplazaba varios puntos."""
                 d = dfo.dropna(subset=["impliedVolatility"]).copy()
+                if not len(d):
+                    return d
+                d = d[d["impliedVolatility"].between(0.03, 3.0)]
+                e1 = d.iloc[0:0]
+                try:
+                    if {"bid", "ask"}.issubset(d.columns):
+                        e1 = d[(d["bid"].fillna(0) > 0) & (d["ask"].fillna(0) > 0)]
+                except Exception:
+                    e1 = d.iloc[0:0]
+                if len(e1):
+                    return e1
+                try:
+                    if "lastTradeDate" in d.columns:
+                        _lt = pd.to_datetime(d["lastTradeDate"], utc=True, errors="coerce")
+                        d = d[_lt >= (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=5))]
+                except Exception:
+                    pass
+                return d
+            cq, pq = _calidad(calls_iv), _calidad(puts_iv)
+            def _iv_near(dfo):
+                d = dfo.copy()
                 if not len(d):
                     return None
                 d["dist"] = (d["strike"] - spot).abs()
                 return float(d.nsmallest(4, "dist")["impliedVolatility"].mean())
-            iv_c, iv_p = _iv_near(calls), _iv_near(puts)
+            iv_c, iv_p = _iv_near(cq), _iv_near(pq)
             iv_atm = ((iv_c + iv_p) / 2) if (iv_c is not None and iv_p is not None) else (iv_c if iv_c is not None else iv_p)
             skew = None
             try:
-                p_otm = puts.iloc[(puts["strike"] - spot * 0.95).abs().argsort()[:1]]
-                c_otm = calls.iloc[(calls["strike"] - spot * 1.05).abs().argsort()[:1]]
-                if len(p_otm) and len(c_otm):
-                    skew = float(p_otm["impliedVolatility"].iloc[0] - c_otm["impliedVolatility"].iloc[0])
-                    if abs(skew) > 0.18:      # >18 ptos de vol entre put y call 5% OTM = cadena rota, no señal
-                        skew = None
+                if len(pq) and len(cq):
+                    p_otm = pq.iloc[(pq["strike"] - spot * 0.95).abs().argsort()[:1]]
+                    c_otm = cq.iloc[(cq["strike"] - spot * 1.05).abs().argsort()[:1]]
+                    if len(p_otm) and len(c_otm):
+                        skew = float(p_otm["impliedVolatility"].iloc[0] - c_otm["impliedVolatility"].iloc[0])
+                        if abs(skew) > 0.18:      # >18 ptos de vol entre put y call 5% OTM = cadena rota, no señal
+                            skew = None
             except Exception:
                 pass
             if iliq:
@@ -2022,7 +2191,8 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                 if abs(mp_dist) > 12:
                     maxpain, mp_dist = None, None
             return {"exp": exp0, "pcr_vol": pcr_vol, "pcr_oi": pcr_oi, "iv": iv_atm, "skew": skew,
-                    "maxpain": maxpain, "mp_dist": mp_dist, "spot": spot, "iliquido": iliq}
+                    "maxpain": maxpain, "mp_dist": mp_dist, "spot": spot, "iliquido": iliq,
+                    "dte_iv": dte_iv}
         except Exception as e:
             _avisar(f"options.{tkr}", f"cadena de opciones no analizada: {type(e).__name__}: {e}")
             return None
@@ -2039,8 +2209,10 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
         if m is None:
             continue
         proxy_lbl = None
-        # --- ETF iliquido con proxy definido: promediar sus acciones grandes ---
-        if (m["iliquido"] or m.get("pcr_vol") is None) and s in OPCIONES_PROXY:
+        # --- ETF iliquido con proxy definido: promediar sus acciones grandes. OJO: solo si fallan
+        #     VOLUMEN y OI a la vez. Antes bastaba pcr_vol=None, y en builds de la manyana europea
+        #     (volumen USA ~0) KRE y compania se leian via acciones sin ser iliquidos de verdad. ---
+        if (m["iliquido"] or (m.get("pcr_vol") is None and m.get("pcr_oi") is None)) and s in OPCIONES_PROXY:
             hijos = []
             for tkr in OPCIONES_PROXY[s]:
                 h = _analiza(tkr)
@@ -2053,7 +2225,8 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                 m = {"exp": hijos[0][1]["exp"], "pcr_vol": _media("pcr_vol"), "pcr_oi": _media("pcr_oi"),
                      "iv": _media("iv"), "skew": _media("skew"),
                      "maxpain": None, "mp_dist": None,        # el max pain de una accion no aplica al ETF
-                     "spot": spot, "iliquido": False}
+                     "spot": spot, "iliquido": False,
+                     "dte_iv": hijos[0][1].get("dte_iv")}
                 proxy_lbl = "+".join(t for t, _ in hijos)
         # IV percentil: solo con el historial del PROPIO ETF (en modo proxy tambien vale: comparamos
         # la IV media de sus grandes contra la vol realizada del ETF — aproximacion honesta)
@@ -2084,7 +2257,8 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                   "maxpain": m.get("maxpain"),
                   "mp_dist": (round(m["mp_dist"], 1) if m.get("mp_dist") is not None else None),
                   "spot": (round(m["spot"], 2) if m.get("spot") else None), "cmf": cmf,
-                  "diverg": diverg, "iliquido": m["iliquido"], "proxy": proxy_lbl}
+                  "diverg": diverg, "iliquido": m["iliquido"], "proxy": proxy_lbl,
+                  "dte_iv": m.get("dte_iv"), "vol_parcial": vol_parcial}
     # --- IV RANK REAL: se guarda la IV de cada ETF en cada ejecucion (historico propio) y, con >=10
     #     observaciones, se calcula el rank contra SU historia. El "IV pct" contra vol realizada sale
     #     inflado siempre (el seguro cotiza con prima de riesgo por naturaleza); el rank propio no. ---
@@ -2098,17 +2272,30 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
             except Exception:
                 _hist = {}
         _hoyk = str(dt.date.today())
+        def _iv_de(v):
+            # formato nuevo: {"iv": x, "dte": n, "proxy": bool}; formato viejo: float suelto
+            return (v.get("iv") if isinstance(v, dict) else v)
         for s, o in out.items():
             if o.get("iv") is None:
                 continue
             serie = _hist.setdefault(s, {})
-            serie[_hoyk] = o["iv"]
+            serie[_hoyk] = {"iv": o["iv"], "dte": o.get("dte_iv"), "proxy": bool(o.get("proxy"))}
             if len(serie) > 250:
                 for k in sorted(serie)[:len(serie) - 250]:
                     serie.pop(k, None)
-            vals = [v for k, v in serie.items() if k != _hoyk]
+            # rank COMPARABLE: mismo modo (directo vs proxy) y tenor similar (+-7 dias). Antes se
+            # mezclaban IVs de vencimientos distintos y de acciones-proxy con las del propio ETF.
+            # Migracion suave: si aun no hay 10 observaciones comparables, se usa el historico entero
+            # (comportamiento antiguo) para no dejar el rank en blanco mientras se llena.
+            _dte0 = o.get("dte_iv")
+            comp = [_iv_de(v) for k, v in serie.items()
+                    if k != _hoyk and isinstance(v, dict) and v.get("iv") is not None
+                    and bool(v.get("proxy")) == bool(o.get("proxy"))
+                    and (v.get("dte") is None or _dte0 is None or abs(v["dte"] - _dte0) <= 7)]
+            vals = comp if len(comp) >= 10 else [x for x in (_iv_de(v) for k, v in serie.items() if k != _hoyk) if x is not None]
             if len(vals) >= 10:
                 o["iv_rank"] = int(round(100 * sum(1 for v in vals if v <= o["iv"]) / len(vals)))
+                o["iv_rank_comparable"] = bool(len(comp) >= 10)
         try:
             _tmp = _ivf + ".tmp"
             json.dump(_hist, open(_tmp, "w", encoding="utf-8"))
@@ -3013,7 +3200,7 @@ def refrescar_con_yahoo(close, hl, ysym):
             else:
                 hl = nhl
     except Exception as e:
-        print(f"  [{ysym}] no se pudo refrescar con Yahoo: {e}")
+        _avisar(f"refresco.{ysym}", f"no se pudo refrescar con Yahoo ({e}); el drawdown puede ir 1 sesion viejo")
     return close, hl
 
 def fetch_es_futuro():
@@ -7121,8 +7308,9 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
             col = "#2FD08A" if d["label"] == "Acumulacion" else "#F4607A" if d["label"] == "Distribucion" else "#93A4BC"
             mag = min(abs(d["flow"]) / 3.0, 1.0) * 50
             left = 50 if d["flow"] >= 0 else 50 - mag
-            cmf = d.get("cmf", 0)
-            ccol = "#2FD08A" if cmf > 0 else "#F4607A" if cmf < 0 else "#93A4BC"
+            cmf = d.get("cmf")
+            ccol = "#93A4BC" if cmf is None else ("#2FD08A" if cmf > 0 else "#F4607A" if cmf < 0 else "#93A4BC")
+            _cmf_txt = "CMF n/d" if cmf is None else f"CMF {cmf:+.2f}"
             cross = " <span class='sc-acc' title='OBV cruzó su media: presión compradora acelerando'>⚡</span>" if d.get("obv_cross") else ""
             vr = d.get("vol_rel", 1.0)
             vcol = "#2FD08A" if d.get("vol_break") else ("#F4B740" if vr >= 1.0 else "#5E708A")
@@ -7132,7 +7320,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                              f"<div class='bar-track'><div class='bar-mid'></div>"
                              f"<div class='bar' style='background:{col};width:{mag:.0f}%;left:{left:.0f}%'></div></div>"
                              f"<span class='bar-val' style='color:{col}'>{d['flow']:+.1f}</span>"
-                             f"<span class='bar-cmf' style='color:{ccol}' title='Chaikin Money Flow'>CMF {cmf:+.2f}</span>"
+                             f"<span class='bar-cmf' style='color:{ccol}' title='Chaikin Money Flow'>{_cmf_txt}</span>"
                              f"{vol_h}</div>")
         div_html = ""
         if divs:
