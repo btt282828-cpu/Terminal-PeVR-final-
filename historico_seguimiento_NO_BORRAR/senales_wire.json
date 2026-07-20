@@ -352,5 +352,137 @@
 "tag": "EARLY",
 "sym": "KWEB",
 "dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "RÉGIMEN",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-07-20",
+"tag": "CLÍMAX",
+"sym": "XLP",
+"dir": -1
+},
+{
+"date": "2026-07-20",
+"tag": "CLÍMAX",
+"sym": "KRE",
+"dir": -1
+},
+{
+"date": "2026-07-20",
+"tag": "NOCTURNO",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "NOCTURNO",
+"sym": "KWEB",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "GRADUADO",
+"sym": "GLD",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "GRADUADO",
+"sym": "GDX",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "GRADUADO",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "GRADUADO",
+"sym": "XLC",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "GIRO",
+"sym": "FXI",
+"dir": -1
+},
+{
+"date": "2026-07-20",
+"tag": "GIRO",
+"sym": "SOXX",
+"dir": -1
+},
+{
+"date": "2026-07-20",
+"tag": "GIRO",
+"sym": "SMH",
+"dir": -1
+},
+{
+"date": "2026-07-20",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-07-20",
+"tag": "0/3",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "0/3",
+"sym": "EWZ",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "0/3",
+"sym": "MOO",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "SUELO",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "SUELO",
+"sym": "EWZ",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "SUELO",
+"sym": "MOO",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "EARLY",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "EARLY",
+"sym": "URA",
+"dir": 1
+},
+{
+"date": "2026-07-20",
+"tag": "EARLY",
+"sym": "GDX",
+"dir": 1
 }
 ]
