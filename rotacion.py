@@ -1149,7 +1149,56 @@ def download_all():
     df = df.dropna()
     if len(df) > WEEKS:
         df = df.iloc[-WEEKS:]
-    # --- VERIFICACION CRUZADA (centinela): el ultimo cierre COMUN de SPY por la fuente secundaria.
+    # --- SANEADOR DE SALTOS IMPOSIBLES: un solo valor corrupto de Yahoo (un pico de escala, p.ej. SPY
+    #     742 -> 74.2 una semana) NO se ve a simple vista pero ENVENENA todo: el backtest (rentabilidad
+    #     y drawdown del benchmark), la fuerza relativa del RRG (todo se mide contra SPY) y el plan de
+    #     caidas. Ningun ETF sin apalancar se mueve >60% en una semana: por encima de eso es error de
+    #     dato. Se detecta el pico (salta y vuelve), se REPARA arrastrando el valor bueno anterior (no
+    #     se inventa: se elimina la basura) y se AVISA con simbolo y semana para que quede en el panel. ---
+    UMBRAL_SALTO = 0.60
+    try:
+        reparados = []
+        for c in df.columns:
+            col = df[c]
+            r = col.pct_change()
+            for i in range(1, len(col) - 1):
+                a, b, d2 = col.iloc[i - 1], col.iloc[i], col.iloc[i + 1]
+                if a and b and d2 and abs(b / a - 1) > UMBRAL_SALTO and abs(d2 / b - 1) > UMBRAL_SALTO:
+                    # pico aislado: iloc[i] es el valor malo -> lo sustituyo por el anterior (bueno)
+                    df.iloc[i, df.columns.get_loc(c)] = a
+                    reparados.append(f"{c}@{col.index[i].date()}")
+            # salto FINAL sin retorno (posible cambio de escala persistente en la ultima barra): umbral
+            # mas alto (80%) para NO reparar por error un movimiento real fuerte de la ultima semana
+            if len(col) >= 2 and col.iloc[-2] and abs(col.iloc[-1] / col.iloc[-2] - 1) > 0.80:
+                df.iloc[-1, df.columns.get_loc(c)] = col.iloc[-2]
+                reparados.append(f"{c}@{col.index[-1].date()}(final)")
+        # --- CAMBIOS DE ESCALA PERSISTENTES: un salto que NO vuelve (Yahoo mezclo ^GSPC ~7400 con SPY
+        #     ~740 en parte de la serie). Ya reparados los picos, cualquier salto >60% que queda es una
+        #     frontera de escala: REESCALO todo el tramo ANTERIOR para que cuadre con el reciente (el
+        #     que coincide con el precio en vivo). Recorro de atras hacia delante (el final es la
+        #     referencia buena) para encadenar varias fronteras si las hubiera. NO se inventa nada: se
+        #     corrige un factor de escala. Se avisa fuerte porque afectaba a backtest/RRG/drawdown. ---
+        reparados_escala = []
+        for c in df.columns:
+            _loc = df.columns.get_loc(c)
+            j = len(df) - 1
+            while j >= 2:
+                a, b = df.iloc[j - 1, _loc], df.iloc[j, _loc]
+                if a and b and abs(b / a - 1) > UMBRAL_SALTO:
+                    factor = b / a                      # reescala [0:j] para que empalme con df[j]
+                    df.iloc[:j, _loc] = df.iloc[:j, _loc] * factor
+                    reparados_escala.append(f"{c}@{df.index[j].date()} (x{factor:.3g})")
+                j -= 1
+        if reparados_escala:
+            _avisar("datos.escala", "cambio(s) de ESCALA persistente(s) corregido(s) reescalando el tramo antiguo al reciente: "
+                    + ", ".join(reparados_escala[:10]) + (f" y {len(reparados_escala)-10} mas" if len(reparados_escala) > 10 else "")
+                    + " — Yahoo mezcló escalas; afectaba a backtest/RRG/drawdown")
+        if reparados:
+            _avisar("datos.saltos", "valores corruptos (salto >60% imposible sin apalancar) REPARADOS arrastrando el bueno anterior: "
+                    + ", ".join(reparados[:12]) + (f" y {len(reparados)-12} mas" if len(reparados) > 12 else "")
+                    + " — afectaban a backtest/RRG/drawdown")
+    except Exception as _e:
+        _avisar("datos.saltos", f"saneador de saltos no pudo ejecutarse: {_e}")
     #     Dos fuentes independientes y no se cotejaban nunca: este es el unico chequeo automatico real
     #     de "¿coincide con lo publicado?" posible sin fuente de pago. Tolerancia 1.5% (ajuste por
     #     dividendos de Yahoo puede desviar fechas antiguas; el ultimo cierre comun debe cuadrar). ---
@@ -2258,6 +2307,33 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                      "dte_iv": hijos[0][1].get("dte_iv"),
                      "n_exp_pcr": hijos[0][1].get("n_exp_pcr")}
                 proxy_lbl = "+".join(t for t, _ in hijos)
+        # --- CLAMP DE IV: el campo impliedVolatility de Yahoo por strike es basura en pre-market o en
+        #     strikes sin cruce (a veces 3-5% o 120-165% para ETFs de renta variable). Un rango fijo no
+        #     basta: XLK a 70% "cabe" en cualquier banda pero su IV real es ~18%. Filtramos por
+        #     plausibilidad REAL, comparando contra la volatilidad realizada del propio ETF:
+        #       (1) banda absoluta [4%, 150%]  -> corta lo groseramente imposible aunque no haya realizada.
+        #       (2) ratio IV/realizada fuera de 0.35x-4.0x -> error de dato, no una prima de riesgo real.
+        #     Si no pasa: IV = "no fiable" (None) y NO se guarda en el historico (no envenena el IV rank). ---
+        if m.get("iv") is not None:
+            _ivv = float(m["iv"])
+            _mal = not (0.04 <= _ivv <= 1.5)
+            _rvnow = None
+            try:
+                if daily and s in daily and daily[s] is not None:
+                    _rc = daily[s]["Close"].pct_change().dropna()
+                    if len(_rc) > 40:
+                        _rvs = (_rc.rolling(21).std() * (252 ** 0.5)).dropna()
+                        if len(_rvs):
+                            _rvnow = float(_rvs.iloc[-1])
+            except Exception:
+                _rvnow = None
+            if _rvnow and _rvnow > 0 and not (0.35 <= _ivv / _rvnow <= 4.0):
+                _mal = True
+            if _mal:
+                _avisar(f"options.{s}", f"IV {_ivv*100:.0f}% no plausible"
+                        + (f" (realizada {_rvnow*100:.0f}%, {_ivv/_rvnow:.1f}x)" if _rvnow else " (fuera de 4%-150%)")
+                        + ": marcada n/d y NO guardada en el rank — Yahoo dio una IV por strike corrupta")
+                m["iv"] = None
         # IV percentil: solo con el historial del PROPIO ETF (en modo proxy tambien vale: comparamos
         # la IV media de sus grandes contra la vol realizada del ETF — aproximacion honesta)
         iv_pct = None
@@ -2875,6 +2951,16 @@ def backtest(df, rrg, hold=("leading", "improving"), trend=None, max_pos=None, w
     buffer = BUFFER if buffer is None else buffer
     idx = list(df.index)
     rets = df.pct_change()
+    # RED DE SEGURIDAD: ningun ETF sin apalancar rinde >60% en una semana. Si un dato corrupto se
+    # colase (un cambio de escala que el saneador no reparo), un retorno de +900% o -90% destrozaria
+    # la curva de equity y daria una rentabilidad/drawdown del benchmark absurdos (el sintoma del
+    # "-22.8% vs SPY" con el mercado en maximos). Capamos a +-60% SOLO lo groseramente imposible.
+    _CAP = 0.60
+    _capados = int((rets.abs() > _CAP).sum().sum())
+    if _capados:
+        rets = rets.clip(lower=-_CAP, upper=_CAP)
+        _avisar("backtest.cap", f"{_capados} retorno(s) semanal(es) imposible(s) (>60%) capados en el backtest: "
+                                "habia un dato corrupto que habria falseado la rentabilidad/drawdown del benchmark")
     bench_ret = rets[BENCH].tolist()
     sectors = list(rrg.keys())
     R = {s: rrg[s]["ratio_series"] for s in sectors}
@@ -4273,7 +4359,7 @@ details.why[open]>summary::before{content:'▾ '}
 .se-now{font-size:9px;color:#0A0E17;background:#5B8CFF;border-radius:4px;padding:1px 6px;font-weight:700;margin-left:8px}
 .se-next{font-size:9px;color:#0A0E17;background:#2FD08A;border-radius:4px;padding:1px 6px;font-weight:700;margin-left:8px}
 .bar-cmf{font-family:ui-monospace,monospace;font-size:10px;margin-left:8px;min-width:62px;text-align:right}
-@media(max-width:640px){.sc-name span{display:none}.sc-h{font-size:8px}.sc-act{font-size:9px}}
+@media(max-width:640px){.sc{min-width:600px}.sc-h{font-size:8px}.sc-act{font-size:9px}}
 @media(max-width:600px){.hm-name span{display:none}.hm-c{font-size:11px}}
 footer{font-size:10.5px;color:var(--txt3);text-align:center;padding:18px 20px;max-width:760px;margin:0 auto;line-height:1.6}
 """
@@ -6431,7 +6517,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                     "<b>OBV por encima de su media</b> y <b>CMF &gt; 0</b> (entra dinero). Ordenado de mayor a menor. "
                     "Regla simple: entra en los <b>4–5/5</b>, vende los que bajen a <b>≤2/5</b>. "
                     "El <b>⚡ acelera</b> marca que el OBV acaba de cruzar su media (entrada temprana). No es asesoramiento.</div>"
-                    f"<table class='sc'><tr><th class='sc-name'></th>{head}<th class='sc-h'>sem. curso</th><th class='sc-h'>desde entrada</th><th class='sc-h'>total</th><th class='sc-h'>acción</th></tr>{body}</table></div>")
+                    f"<div class='scrollx'><table class='sc'><tr><th class='sc-name'></th>{head}<th class='sc-h'>sem. curso</th><th class='sc-h'>desde entrada</th><th class='sc-h'>total</th><th class='sc-h'>acción</th></tr>{body}</table></div></div>")
 
     # ---- CARTERA DE LA SEMANA (Lider + Mejorando + momentum absoluto positivo) ----
     _ord = {"leading": 0, "improving": 1}
@@ -8436,6 +8522,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                    "IV pct = rank contra su PROPIA historia de IV cuando hay &ge;10 registros guardados del MISMO plazo/modo (options_iv.json); mientras se llena, aproximación vs vol realizada — "
                    "ojo: el seguro casi SIEMPRE cotiza con prima sobre el movimiento real, así que en modo aproximado solo los extremos (&ge;97) significan algo. "
                    "El P/C OI (interés abierto) es T-1 y estable a cualquier hora; el P/C vol necesita el cierre para estar completo. "
+                   "Si una IV sale «—» es que Yahoo dio un valor por strike no plausible (fuera de rango vs la volatilidad realizada del ETF) y se descarta para no ensuciar el rank. "
                    "skew&gt;6 = pagan por protección a la baja. max pain = imán de precio al vencimiento (se calcula solo sobre el vencimiento más cercano; útil el 3er viernes). "
                    "⚠ = DIVERGENCIA con el CMF: el flujo dice una cosa y las opciones otra — tu confirmación por segunda vía. "
                    "Liquidez fiable solo en ETFs USA; sirven de señal aunque operes los UCITS.</div>")
