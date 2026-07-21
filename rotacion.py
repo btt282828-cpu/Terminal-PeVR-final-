@@ -2082,22 +2082,54 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
             futuras = [e for e in exps if pd.Timestamp(e) >= hoy]
             if not futuras:
                 return None
-            exp0 = next((e for e in futuras if (pd.Timestamp(e) - hoy).days >= 5), futuras[0])
-            ch = tk.option_chain(exp0)
-            calls, puts = ch.calls, ch.puts
-            if calls is None or puts is None or not len(calls) or not len(puts):
+            # cada cadena se descarga UNA sola vez y se reutiliza (PCR usa 3 vtos, IV usa el de ~30d)
+            _chains = {}
+            def _get_chain(e):
+                if e not in _chains:
+                    try:
+                        c = tk.option_chain(e)
+                        _chains[e] = c if (c.calls is not None and len(c.calls) and c.puts is not None and len(c.puts)) else None
+                    except Exception:
+                        _chains[e] = None
+                return _chains[e]
+            # MEJORA 1: PCR / OI / liquidez agregados sobre los 3 vencimientos mas cercanos (>=5d), no
+            # sobre uno solo. Asi cuadra con el put/call "de portada" que muestran las webs (agregan
+            # todas las fechas) y una sola fecha floja no decide. El max pain SI se queda en el
+            # vencimiento mas cercano, porque es intrinsecamente por-fecha (el strike donde mas
+            # opciones vencen sin valor en ESA expiracion; agregarlo no significaria nada).
+            exps_pcr = [e for e in futuras if (pd.Timestamp(e) - hoy).days >= 5][:3] or futuras[:1]
+            exp0 = exps_pcr[0]
+            ch0 = _get_chain(exp0)
+            if ch0 is None:
                 return None
-            cvol, pvol = float(calls["volume"].fillna(0).sum()), float(puts["volume"].fillna(0).sum())
-            coi, poi = float(calls["openInterest"].fillna(0).sum()), float(puts["openInterest"].fillna(0).sum())
+            calls, puts = ch0.calls, ch0.puts
+            cvol = pvol = coi = poi = 0.0
+            n_exp_pcr = 0
+            for e in exps_pcr:
+                ce = _get_chain(e)
+                if ce is None:
+                    continue
+                cvol += float(ce.calls["volume"].fillna(0).sum())
+                pvol += float(ce.puts["volume"].fillna(0).sum())
+                coi  += float(ce.calls["openInterest"].fillna(0).sum())
+                poi  += float(ce.puts["openInterest"].fillna(0).sum())
+                n_exp_pcr += 1
             _liq_vol = (cvol >= 300 and pvol >= 100)
             _liq_oi = (coi >= 1000 and poi >= 500)
-            pcr_vol = (pvol / cvol) if (cvol > 0 and _liq_vol) else None
+            # MEJORA 2: si el volumen viene PARCIAL (build antes del cierre USA, volumen a medio llenar),
+            # no sirve para juzgar liquidez ni PCR. Mandamos SOLO por OI (estable, T-1): ni marcamos
+            # iliquido por volumen flojo, ni publicamos un pcr_vol provisional que enganye.
+            if vol_parcial:
+                pcr_vol = None
+                iliq = not _liq_oi
+            else:
+                pcr_vol = (pvol / cvol) if (cvol > 0 and _liq_vol) else None
+                iliq = not (_liq_vol or _liq_oi)
             pcr_oi = (poi / coi) if (coi > 0 and _liq_oi) else None
             if pcr_vol is not None and pcr_vol > 3.5:
                 pcr_vol = None
             if pcr_oi is not None and pcr_oi > 3.5:
                 pcr_oi = None
-            iliq = not (_liq_vol or _liq_oi)
             # --- SPOT: cierre diario (hint) -> fast_info validado -> NADA. Jamas se inventa: el antiguo
             #     fallback a la mediana de strikes podia desviarse 5-15% y contaminaba ATM, skew y max pain.
             spot = spot_hint
@@ -2117,13 +2149,10 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
             dte_iv = int((pd.Timestamp(exp_iv) - hoy).days)
             calls_iv, puts_iv = calls, puts
             if exp_iv != exp0:
-                try:
-                    ch2 = tk.option_chain(exp_iv)
-                    if ch2.calls is not None and len(ch2.calls) and ch2.puts is not None and len(ch2.puts):
-                        calls_iv, puts_iv = ch2.calls, ch2.puts
-                    else:
-                        exp_iv, dte_iv = exp0, int((pd.Timestamp(exp0) - hoy).days)
-                except Exception:
+                ch2 = _get_chain(exp_iv)
+                if ch2 is not None:
+                    calls_iv, puts_iv = ch2.calls, ch2.puts
+                else:
                     exp_iv, dte_iv = exp0, int((pd.Timestamp(exp0) - hoy).days)
             def _calidad(dfo):
                 """Strikes con cotizacion VIVA. Etapa 1: bid y ask > 0 e IV plausible. Fuera de horario
@@ -2192,7 +2221,7 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                     maxpain, mp_dist = None, None
             return {"exp": exp0, "pcr_vol": pcr_vol, "pcr_oi": pcr_oi, "iv": iv_atm, "skew": skew,
                     "maxpain": maxpain, "mp_dist": mp_dist, "spot": spot, "iliquido": iliq,
-                    "dte_iv": dte_iv}
+                    "dte_iv": dte_iv, "n_exp_pcr": n_exp_pcr}
         except Exception as e:
             _avisar(f"options.{tkr}", f"cadena de opciones no analizada: {type(e).__name__}: {e}")
             return None
@@ -2226,7 +2255,8 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                      "iv": _media("iv"), "skew": _media("skew"),
                      "maxpain": None, "mp_dist": None,        # el max pain de una accion no aplica al ETF
                      "spot": spot, "iliquido": False,
-                     "dte_iv": hijos[0][1].get("dte_iv")}
+                     "dte_iv": hijos[0][1].get("dte_iv"),
+                     "n_exp_pcr": hijos[0][1].get("n_exp_pcr")}
                 proxy_lbl = "+".join(t for t, _ in hijos)
         # IV percentil: solo con el historial del PROPIO ETF (en modo proxy tambien vale: comparamos
         # la IV media de sus grandes contra la vol realizada del ETF — aproximacion honesta)
@@ -2258,7 +2288,8 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                   "mp_dist": (round(m["mp_dist"], 1) if m.get("mp_dist") is not None else None),
                   "spot": (round(m["spot"], 2) if m.get("spot") else None), "cmf": cmf,
                   "diverg": diverg, "iliquido": m["iliquido"], "proxy": proxy_lbl,
-                  "dte_iv": m.get("dte_iv"), "vol_parcial": vol_parcial}
+                  "dte_iv": m.get("dte_iv"), "vol_parcial": vol_parcial,
+                  "n_exp_pcr": m.get("n_exp_pcr")}
     # --- IV RANK REAL: se guarda la IV de cada ETF en cada ejecucion (historico propio) y, con >=10
     #     observaciones, se calcula el rank contra SU historia. El "IV pct" contra vol realizada sale
     #     inflado siempre (el seguro cotiza con prima de riesgo por naturaleza); el rank propio no. ---
@@ -8359,12 +8390,23 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
         html.append(_mod("FLOW MONITOR — DÓNDE ENTRA Y SALE EL DINERO", fm))
         # --- MODULO OPTIONS DESK: put/call, IV percentil, skew, max pain y DIVERGENCIA con el CMF ---
         if options:
+            _vparc = any(o.get("vol_parcial") for o in options.values())
+            _nexp = next((o.get("n_exp_pcr") for o in options.values() if o.get("n_exp_pcr")), None)
+            _dte_ej = next((o.get("dte_iv") for o in options.values() if o.get("dte_iv") is not None), None)
             _ordit = sorted(options.items(), key=lambda kv: (kv[1].get("diverg") is None, -(kv[1].get("pcr_vol") or 0)))
-            od = ("<table><tr style='color:#888;font-size:10px'><td>ETF</td><td>P/C vol</td><td>P/C OI</td>"
+            _banner = ""
+            if _vparc:
+                _banner = (f"<div style='background:{AMB}22;border:1px solid {AMB}66;border-radius:6px;padding:6px 9px;"
+                           f"margin-bottom:6px;font-size:11px;color:{AMB}'>⚠ Build lanzado con la sesión de EE.UU. abierta: "
+                           "el volumen de opciones va a medio llenar. La liquidez y las señales de este panel se calculan por "
+                           "<b>interés abierto (P/C OI)</b>, que es estable; el <b>P/C vol sale «n/d» a propósito</b> para no darte un "
+                           "número provisional. Para el put/call de volumen bueno, el build del cierre.</div>")
+            od = (_banner + "<table><tr style='color:#888;font-size:10px'><td>ETF</td><td>P/C vol</td><td>P/C OI</td>"
                   "<td>IV</td><td>IV pct</td><td>skew</td><td>max pain</td><td>señal</td></tr>")
             for _s, _o in _ordit:
                 _pcr = _o.get("pcr_vol")
                 _pcc = RED if (_pcr and _pcr > 1.3) else (GRN if (_pcr and _pcr < 0.7) else GRY)
+                _pcr_txt = ("n/d" if (_pcr is None and _o.get("vol_parcial")) else (_pcr if _pcr is not None else "—"))
                 _ivp = _o.get("iv_rank") if _o.get("iv_rank") is not None else _o.get("iv_pct")
                 _ivpc = RED if (_ivp is not None and _ivp >= 80) else (GRN if (_ivp is not None and _ivp <= 20) else GRY)
                 _sk = _o.get("skew")
@@ -8377,7 +8419,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                 if _pxl:
                     _dvtxt = f"<span style='color:{CYN};font-size:9px'>vía {esc(_pxl)}</span> " + _dvtxt
                 od += (f"<tr><td><b style='color:{CYN}'>{_s}</b></td>"
-                       f"<td style='color:{_pcc}'>{_pcr if _pcr is not None else '—'}</td>"
+                       f"<td style='color:{_pcc}'>{_pcr_txt}</td>"
                        f"<td style='color:{GRY}'>{_o.get('pcr_oi') if _o.get('pcr_oi') is not None else '—'}</td>"
                        f"<td style='color:{GRY}'>{(str(_o['iv']) + '%') if _o.get('iv') is not None else '—'}</td>"
                        f"<td style='color:{_ivpc}'>{(str(_ivp)) if _ivp is not None else '—'}</td>"
@@ -8385,11 +8427,16 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                        f"<td style='color:{GRY};font-size:10px'>{_mptxt}</td>"
                        f"<td style='font-size:10px'>{_dvtxt}</td></tr>")
             od += ("</table><div style='font-size:10px;color:#666;margin-top:4px'>"
-                   "Opciones de Yahoo (gratis). P/C&gt;1.3 = miedo/protección (rojo); &lt;0.7 = codicia (verde). "
-                   "IV pct = rank contra su PROPIA historia de IV cuando hay &ge;10 registros guardados (options_iv.json); mientras se llena, aproximación vs vol realizada — "
+                   "Opciones de Yahoo (gratis). "
+                   + (f"P/C agrega los {_nexp} vencimientos más próximos (como el put/call «de portada» que ves en las webs); "
+                      if _nexp and _nexp > 1 else "")
+                   + (f"IV medida al vencimiento más cercano a ~30 días ({_dte_ej}d en este build) para que el rank compare siempre el mismo plazo. "
+                      if _dte_ej is not None else "")
+                   + "P/C&gt;1.3 = miedo/protección (rojo); &lt;0.7 = codicia (verde). "
+                   "IV pct = rank contra su PROPIA historia de IV cuando hay &ge;10 registros guardados del MISMO plazo/modo (options_iv.json); mientras se llena, aproximación vs vol realizada — "
                    "ojo: el seguro casi SIEMPRE cotiza con prima sobre el movimiento real, así que en modo aproximado solo los extremos (&ge;97) significan algo. "
-                   "Si ejecutas en fin de semana, el volumen de opciones es el del viernes y puede venir parcial: fíate más del P/C OI que del P/C vol. "
-                   "skew&gt;6 = pagan por protección a la baja. max pain = imán de precio al vencimiento (útil el 3er viernes). "
+                   "El P/C OI (interés abierto) es T-1 y estable a cualquier hora; el P/C vol necesita el cierre para estar completo. "
+                   "skew&gt;6 = pagan por protección a la baja. max pain = imán de precio al vencimiento (se calcula solo sobre el vencimiento más cercano; útil el 3er viernes). "
                    "⚠ = DIVERGENCIA con el CMF: el flujo dice una cosa y las opciones otra — tu confirmación por segunda vía. "
                    "Liquidez fiable solo en ETFs USA; sirven de señal aunque operes los UCITS.</div>")
             html.append(_mod("OPTIONS DESK — POSICIONAMIENTO EN DERIVADOS · DIVERGENCIA vs FLUJO", od))
