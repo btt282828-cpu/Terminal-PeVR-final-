@@ -173,6 +173,9 @@ DESKS_POKER = [
     {"id": "MINERAS", "emoji": "⚒️", "titulo": "MINERAS DESK", "prefs": ["GDX", "SIL"], "lead_keys": ["XLB"],
      "veh": "el rebote se juega LARGO y en contado (GDX = beta sobre el oro, SIL sobre la plata: amplifican al metal en AMBOS sentidos)",
      "riesgo": "Si GLD/SLV corrigen, las mineras caen el doble — vigila S-DUROS y el dólar. Y tu regla aquí ya demostrada: el suelo de oro/BTC/mineras se compró con el patrón, no con la noticia"},
+    {"id": "COBRE", "emoji": "🟠", "titulo": "COBRE DESK", "prefs": ["COPX", "XME"], "lead_keys": ["XLB"],
+     "veh": "el rebote se juega LARGO y en contado (COPX = mineras de cobre puras, beta alta sobre el precio del cobre; XME la versión más diversificada de metales si COPX no tiene mano). Sin par apalancado limpio en tu universo: si quieres beta extra, sube tamaño DENTRO del límite, no apalances",
+     "riesgo": "El cobre es el termómetro del ciclo industrial global: baila con China (mayor consumidor del planeta), el dólar y los datos macro. Un dato chino flojo o un dólar fuerte aborta el rebote aunque el patrón fuera perfecto. Cruza siempre con FXI y S-DUROS"},
     {"id": "ESPACIO", "emoji": "🚀", "titulo": "ESPACIO DESK", "prefs": ["ARKX", "ITA"], "lead_keys": ["ITA"],
      "veh": "el rebote se juega LARGO y en contado (ARKX es el pure-play; ITA el primo defensa con contratos gubernamentales). Historia corta del ETF: los cubos tienen menos muestra, fíate más del IC ancho que del % central",
      "riesgo": "Espacio es tema de flujos minoristas y noticias de lanzamientos (RKLB, ASTS…): movimientos de +/−10% en días. El tamaño manda y el stop es sagrado"},
@@ -2276,6 +2279,7 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
             return None
 
     out = {}
+    _iv_descartadas = []   # se agrupan en UN solo aviso al final (evita inundar el panel de salud)
     for s in symbols[:max_syms]:
         spot = None
         try:
@@ -2330,9 +2334,7 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
             if _rvnow and _rvnow > 0 and not (0.35 <= _ivv / _rvnow <= 4.0):
                 _mal = True
             if _mal:
-                _avisar(f"options.{s}", f"IV {_ivv*100:.0f}% no plausible"
-                        + (f" (realizada {_rvnow*100:.0f}%, {_ivv/_rvnow:.1f}x)" if _rvnow else " (fuera de 4%-150%)")
-                        + ": marcada n/d y NO guardada en el rank — Yahoo dio una IV por strike corrupta")
+                _iv_descartadas.append(f"{s} {_ivv*100:.0f}%" + (f"/{_rvnow*100:.0f}r" if _rvnow else ""))
                 m["iv"] = None
         # IV percentil: solo con el historial del PROPIO ETF (en modo proxy tambien vale: comparamos
         # la IV media de sus grandes contra la vol realizada del ETF — aproximacion honesta)
@@ -2411,6 +2413,13 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
             pass
     except Exception as _e_iv:
         _avisar("options.iv_rank", f"historial de IV no persistido (el IV pct usara la aproximacion): {_e_iv}")
+    # UN solo aviso para TODAS las IVs descartadas (en vez de uno por ETF, que inundaba el panel).
+    # En builds pre-mercado Yahoo da IVs por strike corruptas en casi todos: es NORMAL, no un fallo.
+    if _iv_descartadas:
+        _extra = " — build con la bolsa USA cerrada: a esta hora Yahoo da IVs poco fiables en casi todos; el build del cierre las trae limpias" if vol_parcial else ""
+        _avisar("options.iv", f"IV descartada por no plausible en {len(_iv_descartadas)} ETF(s) "
+                f"(no fiable vs su volatilidad realizada; no ensucia el rank): {', '.join(_iv_descartadas[:16])}"
+                + (f" y {len(_iv_descartadas)-16} mas" if len(_iv_descartadas) > 16 else "") + _extra)
     return out or None
 
 def _vd_card(v):
@@ -8479,14 +8488,23 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
             _vparc = any(o.get("vol_parcial") for o in options.values())
             _nexp = next((o.get("n_exp_pcr") for o in options.values() if o.get("n_exp_pcr")), None)
             _dte_ej = next((o.get("dte_iv") for o in options.values() if o.get("dte_iv") is not None), None)
+            # ¿el interes abierto tampoco esta poblado? (Yahoo suele NO dar OI antes de la apertura USA)
+            _oi_vacio = sum(1 for o in options.values() if o.get("pcr_oi") is not None) < max(3, len(options) // 5)
             _ordit = sorted(options.items(), key=lambda kv: (kv[1].get("diverg") is None, -(kv[1].get("pcr_vol") or 0)))
             _banner = ""
-            if _vparc:
+            if _vparc and _oi_vacio:
                 _banner = (f"<div style='background:{AMB}22;border:1px solid {AMB}66;border-radius:6px;padding:6px 9px;"
-                           f"margin-bottom:6px;font-size:11px;color:{AMB}'>⚠ Build lanzado con la sesión de EE.UU. abierta: "
-                           "el volumen de opciones va a medio llenar. La liquidez y las señales de este panel se calculan por "
-                           "<b>interés abierto (P/C OI)</b>, que es estable; el <b>P/C vol sale «n/d» a propósito</b> para no darte un "
-                           "número provisional. Para el put/call de volumen bueno, el build del cierre.</div>")
+                           f"margin-bottom:6px;font-size:11px;color:{AMB}'>⚠ Build lanzado con la bolsa USA CERRADA (pre-market): "
+                           "a esta hora Yahoo casi no da datos de opciones fiables — ni volumen (P/C vol) ni interés abierto (P/C OI) ni "
+                           "IV limpia. Por eso ves muchos «—»: <b>no es un fallo, es que el dato no existe todavía</b>. El resto del terminal "
+                           "(RRG, scoring, flujo, régimen) va perfecto. <b>Para que el panel de opciones sirva, lanza el build tras el cierre USA "
+                           "(a partir de las ~22:15 hora de España).</b></div>")
+            elif _vparc:
+                _banner = (f"<div style='background:{AMB}22;border:1px solid {AMB}66;border-radius:6px;padding:6px 9px;"
+                           f"margin-bottom:6px;font-size:11px;color:{AMB}'>⚠ Build con la sesión de EE.UU. abierta: "
+                           "el volumen de opciones va a medio llenar, así que la liquidez y las señales se calculan por "
+                           "<b>interés abierto (P/C OI)</b>, que es estable; el <b>P/C vol sale «n/d» a propósito</b>. "
+                           "Para el put/call de volumen completo, el build del cierre.</div>")
             od = (_banner + "<table><tr style='color:#888;font-size:10px'><td>ETF</td><td>P/C vol</td><td>P/C OI</td>"
                   "<td>IV</td><td>IV pct</td><td>skew</td><td>max pain</td><td>señal</td></tr>")
             for _s, _o in _ordit:
