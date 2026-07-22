@@ -580,5 +580,101 @@
 "tag": "EARLY",
 "sym": "GDX",
 "dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "RÉGIMEN",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-07-22",
+"tag": "NOCTURNO",
+"sym": "KWEB",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "GRADUADO",
+"sym": "GLD",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "GRADUADO",
+"sym": "GDX",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "GRADUADO",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "GRADUADO",
+"sym": "XLC",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-07-22",
+"tag": "0/3",
+"sym": "URA",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "0/3",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "0/3",
+"sym": "EWZ",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "SUELO",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "SUELO",
+"sym": "URA",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "SUELO",
+"sym": "MOO",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "EARLY",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "EARLY",
+"sym": "URA",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "EARLY",
+"sym": "GDX",
+"dir": 1
 }
 ]
