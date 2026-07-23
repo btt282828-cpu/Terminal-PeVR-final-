@@ -595,6 +595,12 @@
 },
 {
 "date": "2026-07-22",
+"tag": "NOCTURNO",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-22",
 "tag": "GRADUADO",
 "sym": "GLD",
 "dir": 1
@@ -619,15 +625,27 @@
 },
 {
 "date": "2026-07-22",
-"tag": "RISK",
-"sym": "XTB",
+"tag": "GIRO",
+"sym": "SOXX",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "GIRO",
+"sym": "SMH",
+"dir": 1
+},
+{
+"date": "2026-07-22",
+"tag": "GIRO",
+"sym": "SIL",
 "dir": -1
 },
 {
 "date": "2026-07-22",
-"tag": "0/3",
-"sym": "URA",
-"dir": 1
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
 },
 {
 "date": "2026-07-22",
@@ -650,7 +668,7 @@
 {
 "date": "2026-07-22",
 "tag": "SUELO",
-"sym": "URA",
+"sym": "EWZ",
 "dir": 1
 },
 {
