@@ -2178,10 +2178,22 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
                 pcr_vol = (pvol / cvol) if (cvol > 0 and _liq_vol) else None
                 iliq = not (_liq_vol or _liq_oi)
             pcr_oi = (poi / coi) if (coi > 0 and _liq_oi) else None
-            if pcr_vol is not None and pcr_vol > 3.5:
+            # --- CLAMP SIMÉTRICO DEL PUT/CALL. El filtro era ASIMÉTRICO: censuraba el extremo de miedo
+            #     (>3.5) pero dejaba pasar el de complacencia. Un P/C de 0.2 (5 calls por cada put) es
+            #     rarísimo en un ETF sectorial y casi siempre es cadena fina o dato roto — pero generaba
+            #     "CONFIANZA" y, peor, la narrativa alcista "posible suelo / manos fuertes" sobre ETFs
+            #     cuyo flujo estaba sangrando. Ahora la banda es simétrica en escala logarítmica
+            #     (1/3.5 = 0.29): fuera de [0.29, 3.5] no es lectura, es artefacto.
+            _PCR_HI, _PCR_LO = 3.5, 1 / 3.5
+            _pcr_raros = []
+            if pcr_vol is not None and not (_PCR_LO <= pcr_vol <= _PCR_HI):
+                _pcr_raros.append(f"vol {pcr_vol:.2f}")
                 pcr_vol = None
-            if pcr_oi is not None and pcr_oi > 3.5:
+            if pcr_oi is not None and not (_PCR_LO <= pcr_oi <= _PCR_HI):
+                _pcr_raros.append(f"OI {pcr_oi:.2f}")
                 pcr_oi = None
+            if _pcr_raros:
+                _pcr_descartados.append(f"{tkr} ({', '.join(_pcr_raros)})")
             # --- SPOT: cierre diario (hint) -> fast_info validado -> NADA. Jamas se inventa: el antiguo
             #     fallback a la mediana de strikes podia desviarse 5-15% y contaminaba ATM, skew y max pain.
             spot = spot_hint
@@ -2280,6 +2292,7 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
 
     out = {}
     _iv_descartadas = []   # se agrupan en UN solo aviso al final (evita inundar el panel de salud)
+    _pcr_descartados = []  # put/call fuera de banda plausible (cadena fina o dato roto)
     for s in symbols[:max_syms]:
         spot = None
         try:
@@ -2420,6 +2433,10 @@ def compute_options(symbols, flow=None, daily=None, max_syms=40):
         _avisar("options.iv", f"IV descartada por no plausible en {len(_iv_descartadas)} ETF(s) "
                 f"(no fiable vs su volatilidad realizada; no ensucia el rank): {', '.join(_iv_descartadas[:16])}"
                 + (f" y {len(_iv_descartadas)-16} mas" if len(_iv_descartadas) > 16 else "") + _extra)
+    if _pcr_descartados:
+        _avisar("options.pcr", f"put/call fuera de banda plausible [0.29-3.5] en {len(_pcr_descartados)} ETF(s) "
+                f"— cadena fina o dato roto: NO se publica ni genera narrativa alcista/bajista: {', '.join(_pcr_descartados[:12])}"
+                + (f" y {len(_pcr_descartados)-12} mas" if len(_pcr_descartados) > 12 else ""))
     return out or None
 
 def _vd_card(v):
@@ -2538,8 +2555,12 @@ def explicar_opciones(options, flow=None, rrg=None, cartera=None):
             frases.append(f"Las opciones del propio ETF apenas se mueven, así que miro las de sus empresas más grandes ({o['proxy'].replace('+', ', ')}) — es una pista de apoyo, no la señal principal.")
         if o.get("iliquido"):
             frases.append("Sus opciones se mueven muy poco (mercado ilíquido): no hay lectura fiable aquí, ignóralas y guíate por el flujo de contado.")
-        _combo = (pcr is not None and pcr < 0.7 and sk is not None and sk > 6)
-        if pcr is not None:
+        # INCOHERENCIA CORREGIDA: antes se decía "ignóralas" y a continuación se soltaban afirmaciones
+        # sobre seguros, IV y skew de esa MISMA cadena ilíquida (el caso XRT: "ignóralas" + "el seguro
+        # está caro, esperan algo gordo"). Si no hay lectura fiable, no se afirma nada de opciones.
+        _fiable = not o.get("iliquido")
+        _combo = (_fiable and pcr is not None and pcr < 0.7 and sk is not None and sk > 6)
+        if _fiable and pcr is not None:
             if _combo:
                 frases.append(f"Se compran pocos seguros ({pcr:.1f} por apuesta alcista), pero los pocos que se compran se pagan CAROS y contra caídas: confianza en la superficie, cobertura discreta por debajo.")
             elif pcr > 1.3:
@@ -2548,22 +2569,22 @@ def explicar_opciones(options, flow=None, rrg=None, cartera=None):
                 frases.append(f"Casi nadie compra seguro (solo {pcr:.1f} por apuesta alcista): CONFIANZA, a veces exceso de ella.")
             else:
                 frases.append("Los seguros y las apuestas alcistas están equilibrados: sin señal fuerte por aquí.")
-        if o.get("iv_rank") is not None:
+        if _fiable and o.get("iv_rank") is not None:
             if o["iv_rank"] >= 85:
                 frases.append(f"El seguro está más caro que el {o['iv_rank']}% de los últimos meses: esperan movimiento fuerte pronto (mira News: suele haber un catalizador con fecha).")
             elif o["iv_rank"] <= 15:
                 frases.append("El seguro está más barato que de costumbre: nadie espera sustos a corto plazo.")
-        elif ivp is not None:
+        elif _fiable and ivp is not None:
             # aproximacion IV-vs-movimiento-real: el seguro SIEMPRE cotiza con prima, asi que solo los extremos dicen algo
             if ivp >= 97:
                 frases.append("El seguro está caro incluso para lo habitual (y el seguro casi siempre cuesta más que el movimiento real): esperan algo gordo.")
             elif ivp <= 20:
                 frases.append("El seguro está barato: nadie espera sustos a corto plazo.")
-        if sk is not None and sk > 6 and not _combo:
+        if _fiable and sk is not None and sk > 6 and not _combo:
             frases.append("Además pagan un EXTRA por protegerse de caídas concretamente (no de subidas): temen el lado de abajo.")
-        elif sk is not None and sk < 0:
+        elif _fiable and sk is not None and sk < 0:
             frases.append("Curioso: la apuesta a subir cuesta MÁS que el seguro — apetito alcista poco habitual.")
-        if mp is not None and abs(mp) >= 2:
+        if _fiable and mp is not None and abs(mp) >= 2:
             frases.append(f"El vencimiento de opciones «tira» del precio hacia un {mp:+.1f}% desde aquí (efecto imán del tercer viernes; se disipa al pasar).")
         # 3) VEREDICTO: el cruce de las dos vias (contado vs opciones), en una frase
         if o.get("iliquido"):
@@ -4886,6 +4907,175 @@ def compute_suelo(df, rrg, scores, flow, meanrev):
     return [r for r in rows if r["pts"] >= 5 or r["pre"] >= 3][:14] or None
 
 
+DESPERTARES_FILE = os.path.join(SEGUIMIENTO_DIR, "despertares.json")
+DESPERTARES_BAK = os.path.join(SEGUIMIENTO_DIR, "despertares.bak.json")
+
+
+def update_despertares(suelo, daily, close_date, bench="SPY"):
+    """LIBRO DE DESPERTARES — el registro de anticipación, fechado y falsable.
+
+    Idea: cualquiera dice "compra uranio". Lo que nadie publica es "el dia X mi sistema marco URA
+    con ESTAS huellas y ESTE nivel de invalidacion; aqui esta el resultado a 4 semanas, incluidos
+    los fallos". Eso es lo unico que hace creible (y monetizable) el sistema.
+
+    Se persiste SOLO la ficha (fecha, huellas, precio y nivel de invalidacion). El resultado se
+    RECALCULA en cada build desde los precios reales: asi nunca hay un numero guardado que pueda
+    quedar desfasado o maquillado. Una ficha por despertar (no se re-registra el mismo simbolo
+    mientras siga viva), y se evalua sola a las 4 semanas gane o pierda.
+
+    Devuelve {"activas": [...], "cadena": [...], "libro": {...}} o None."""
+    if suelo is None and not os.path.exists(DESPERTARES_FILE):
+        return None
+    suelo = suelo or []
+    os.makedirs(SEGUIMIENTO_DIR, exist_ok=True)
+    recs = []
+    for _f in (DESPERTARES_FILE, DESPERTARES_BAK):
+        if os.path.exists(_f):
+            try:
+                with open(_f, "r", encoding="utf-8") as fh:
+                    recs = json.load(fh)
+                break
+            except Exception:
+                continue
+    hoy = str(close_date)
+
+    def _cierre(sym):
+        d = (daily or {}).get(sym)
+        if d is None or "Close" not in d.columns:
+            return None
+        s = d["Close"].dropna()
+        return s if len(s) else None
+
+    # --- 1) REGISTRAR las fichas nuevas de este cierre -------------------------------------
+    # ANTI-DUPLICADO: no se abre ficha nueva si ese simbolo ya tuvo una en las ultimas 8 semanas
+    # (viva o ya madurada). Sin esta ventana, al madurar la ficha el simbolo volvia a estar "libre"
+    # y el sistema se auto-registraba otra vez cada build: el libro se llenaba de clones.
+    FASES_FICHA = ("DESPERTANDO", "PRE-DESPERTAR")
+    try:
+        _corte = str((pd.Timestamp(hoy) - pd.Timedelta(days=56)).date())
+    except Exception:
+        _corte = ""
+    vetados = {r["sym"] for r in recs if (not r.get("cerrada")) or (r.get("date") or "") >= _corte}
+    for r in suelo:
+        if r.get("fase") not in FASES_FICHA or r.get("sangra"):
+            continue
+        s = r["sym"]
+        if s in vetados:                    # ficha viva o demasiado reciente: no se duplica
+            continue
+        px = _cierre(s)
+        if px is None or len(px) < 30:
+            continue
+        px0 = float(px.iloc[-1])
+        # NIVEL DE INVALIDACION: el minimo de las ultimas 20 sesiones CON UN 3% DE MARGEN. Sin ese
+        # margen el nivel queda pegado al minimo (un durmiente cotiza cerca de sus minimos por
+        # definicion) y cualquier ruido lo rompia: fichas que acababan +11% salian "invalidadas".
+        # No es un stop de trading: es la condicion que FALSA la tesis, declarada antes del resultado.
+        inval = round(float(px.iloc[-20:].min()) * 0.97, 2)
+        recs.append({"date": hoy, "sym": s, "fase": r.get("fase"),
+                     "pts": r.get("pts"), "pre": r.get("pre"),
+                     "caida": (round(r["hi52"] - 100, 1) if r.get("hi52") is not None else None),
+                     "cmf": r.get("cmf"), "sil": r.get("sil"), "vr": r.get("vr"),
+                     "huellas": [h for h in (r.get("det") or [])][:4],
+                     "px0": round(px0, 2), "inval": inval, "cerrada": False})
+        vetados.add(s)
+    # limite de tamano: 200 fichas mas recientes
+    if len(recs) > 200:
+        recs = sorted(recs, key=lambda r: r.get("date", ""))[-200:]
+
+    # --- 2) EVALUAR (recalculado siempre desde precios reales) -----------------------------
+    bpx = _cierre(bench)
+    activas, cerradas = [], []
+    for r in recs:
+        px = _cierre(r["sym"])
+        if px is None:
+            continue
+        try:
+            f0 = pd.Timestamp(r["date"])
+            post = px[px.index >= f0]
+            if not len(post):
+                continue
+            n_ses = len(post) - 1
+            px_now = float(post.iloc[-1])
+            base = float(post.iloc[0])
+            ret = (px_now / base - 1) * 100
+            # ¿toco el nivel de invalidacion en algun momento?
+            roto = bool(r.get("inval") and float(post.min()) <= float(r["inval"]))
+            # rendimiento del indice en la MISMA ventana (misma pregunta, misma fecha)
+            ret_b = None
+            if bpx is not None:
+                bp = bpx[bpx.index >= f0]
+                if len(bp) > 1:
+                    ret_b = (float(bp.iloc[-1]) / float(bp.iloc[0]) - 1) * 100
+            # MADURA a las 4 semanas (20 sesiones): a partir de ahi el resultado queda fijado
+            madura = n_ses >= 20
+            if madura:
+                fin = post.iloc[:21]
+                ret4 = (float(fin.iloc[-1]) / base - 1) * 100
+                ret4_b = None
+                if bpx is not None:
+                    bp = bpx[bpx.index >= f0].iloc[:21]
+                    if len(bp) > 1:
+                        ret4_b = (float(bp.iloc[-1]) / float(bp.iloc[0]) - 1) * 100
+                roto4 = bool(r.get("inval") and float(fin.min()) <= float(r["inval"]))
+                r["cerrada"] = True
+                cerradas.append({**r, "ret": round(ret4, 1), "ret_b": (round(ret4_b, 1) if ret4_b is not None else None),
+                                 "vs": (round(ret4 - ret4_b, 1) if ret4_b is not None else None),
+                                 "roto": roto4, "gana": ret4 > 0, "n_ses": n_ses,
+                                 "ret_hoy": round(ret, 1)})
+            else:
+                r["cerrada"] = False
+                activas.append({**r, "ret": round(ret, 1), "ret_b": (round(ret_b, 1) if ret_b is not None else None),
+                                "vs": (round(ret - ret_b, 1) if ret_b is not None else None),
+                                "roto": roto, "n_ses": n_ses,
+                                "faltan": max(0, 20 - n_ses)})
+        except Exception:
+            continue
+    try:
+        with open(DESPERTARES_FILE, "w", encoding="utf-8") as fh:
+            json.dump(recs, fh, ensure_ascii=False, indent=0)
+        with open(DESPERTARES_BAK, "w", encoding="utf-8") as fh:
+            json.dump(recs, fh, ensure_ascii=False, indent=0)
+    except Exception:
+        pass
+
+    # --- 3) EL LIBRO: tasa base fuera de muestra, con los fallos dentro ---------------------
+    libro = None
+    n = len(cerradas)
+    if n:
+        gan = sum(1 for c in cerradas if c["gana"])
+        p = gan / n
+        zz = 1.96
+        den = 1 + zz * zz / n
+        ctr = (p + zz * zz / (2 * n)) / den
+        rad = zz * math.sqrt(p * (1 - p) / n + zz * zz / (4 * n * n)) / den
+        med = sorted(c["ret"] for c in cerradas)
+        vs_ok = [c["vs"] for c in cerradas if c.get("vs") is not None]
+        # DESGLOSE POR FASE: la pregunta central de tu tesis — ¿entrar en el giro (DESPERTANDO) rinde
+        # mas que entrar antes (PRE-DESPERTAR)? Con el libro se puede RESPONDER en vez de opinar.
+        porfase = {}
+        for f in ("DESPERTANDO", "PRE-DESPERTAR"):
+            sub = [c for c in cerradas if c.get("fase") == f]
+            if sub:
+                porfase[f] = {"n": len(sub),
+                              "gan": sum(1 for c in sub if c["gana"]),
+                              "p": int(round(100 * sum(1 for c in sub if c["gana"]) / len(sub))),
+                              "avg": round(sum(c["ret"] for c in sub) / len(sub), 1)}
+        libro = {"n": n, "gan": gan, "p": int(round(100 * p)),
+                 "lo": int(round(100 * (ctr - rad))), "hi": int(round(100 * (ctr + rad))),
+                 "avg": round(sum(c["ret"] for c in cerradas) / n, 1),
+                 "med": round(med[n // 2], 1),
+                 "avg_vs": (round(sum(vs_ok) / len(vs_ok), 1) if vs_ok else None),
+                 "rotas": sum(1 for c in cerradas if c.get("roto")),
+                 "porfase": porfase,
+                 "maduro": n >= 20}
+    # DESPERTANDO primero: es la fase del giro, la que Pedro quiere cazar. Luego por patron y fecha.
+    activas.sort(key=lambda r: (0 if r.get("fase") == "DESPERTANDO" else 1,
+                                -(r.get("pts") or 0), r.get("date") or ""))
+    cerradas.sort(key=lambda r: (r.get("date") or ""), reverse=True)
+    return {"activas": activas, "cadena": cerradas[:24], "libro": libro,
+            "total": len(recs)}
+
+
 def compute_giro_intradia(daily, rrg=None):
     """Huella del GIRO INTRADIA en la ultima vela diaria: gap de apertura fuerte que la sesion
     revierte. Gap arriba + cierre en el tercio bajo del rango = abrieron comprando y cerraron
@@ -5508,6 +5698,70 @@ def compute_rebote_desk(df, daily, rrg, flow, scores, leaders, giro=None, prefs=
             "pts": pts, "det": det, "ev": ev, "n_hist": len(w)}
 
 
+def compute_analogos_flujo(daily, sym_precio, sym_flujo=None, n_sesiones=2, horizontes=(1, 5, 10, 21, 30)):
+    """DETECTOR DE ANÁLOGOS (contexto, NO señal de trading).
+
+    Busca en el histórico DIARIO las veces que se repitió la condición:
+        el ETF cae  Y  el dinero sale (CMF de su hermano de flujo negativo)  N sesiones SEGUIDAS
+    y mide qué hizo el precio después a T+1/T+5/T+10/T+21/T+30.
+
+    Honestidad de origen: la idea viene de una tabla que mide el "sell skew" del MINORISTA (flujo de
+    ordenes de pago que este terminal NO tiene). Aqui se usa el CMF como proxy de flujo: NO es lo
+    mismo — el CMF dice "sale dinero", no "vendio el minorista". Se etiqueta como frecuencia
+    historica con N visible e IC de Wilson, nunca como probabilidad ni prediccion."""
+    d = (daily or {}).get(sym_precio)
+    if d is None or "Close" not in d.columns or len(d) < 120:
+        return None
+    df_f = (daily or {}).get(sym_flujo or sym_precio)
+    if df_f is None or not {"High", "Low", "Close", "Volume"}.issubset(df_f.columns) or len(df_f) < 60:
+        return None
+    px = d["Close"].dropna()
+    # CMF diario de 20 sesiones sobre el simbolo de flujo (mismo calculo que el resto del terminal)
+    hi, lo, cl, vo = df_f["High"], df_f["Low"], df_f["Close"], df_f["Volume"].astype(float)
+    rng = (hi - lo).replace(0, np.nan)
+    mfv = ((((cl - lo) - (hi - cl)) / rng).fillna(0)) * vo
+    cmf = (mfv.rolling(20).sum() / vo.rolling(20).sum()).reindex(px.index).ffill(limit=3)
+    baja = px.pct_change() < 0
+    cond = baja & (cmf < 0)
+    # racha de N sesiones consecutivas cumpliendo la condicion; se marca el ULTIMO dia de la racha
+    racha = cond.astype(int).groupby((~cond).cumsum()).cumsum()
+    disparo = (racha == n_sesiones)          # exactamente al alcanzar N (no cuenta cada dia extra)
+    idxs = list(np.where(disparo.values)[0])
+    if len(idxs) < 4:
+        return None
+    def _wil(p, n, zz=1.96):
+        den = 1 + zz * zz / n
+        ctr = (p + zz * zz / (2 * n)) / den
+        rad = zz * math.sqrt(p * (1 - p) / n + zz * zz / (4 * n * n)) / den
+        return int(round(100 * (ctr - rad))), int(round(100 * (ctr + rad)))
+    filas = []
+    v = px.values
+    for h in horizontes:
+        rets = [(v[i + h] / v[i] - 1) for i in idxs if i + h < len(v)]
+        n = len(rets)
+        if n < 4:
+            continue
+        p = sum(1 for r in rets if r > 0) / n
+        wlo, whi = _wil(p, n)
+        filas.append({"h": h, "n": n, "p": int(round(100 * p)), "lo": wlo, "hi": whi,
+                      "avg": round(100 * float(np.mean(rets)), 1),
+                      "med": round(100 * float(np.median(rets)), 1)})
+    if not filas:
+        return None
+    # ¿la condicion esta ACTIVA ahora mismo? (racha >= N en la ultima sesion)
+    activa = bool(racha.iloc[-1] >= n_sesiones)
+    ultima = None
+    if idxs:
+        try:
+            ultima = str(px.index[idxs[-1]].date())
+        except Exception:
+            ultima = None
+    return {"sym": sym_precio, "flujo": (sym_flujo or sym_precio), "n_ses": n_sesiones,
+            "casos": len(idxs), "filas": filas, "activa": activa, "ultima": ultima,
+            "cmf_hoy": (round(float(cmf.iloc[-1]), 3) if pd.notna(cmf.iloc[-1]) else None),
+            "racha_hoy": int(racha.iloc[-1])}
+
+
 def compute_attention_radar(rrg, flow):
     """Cruza tendencia (RRG) con volumen relativo (proxy de atencion del MERCADO, no de prensa, pero capta
     la misma idea de forma fiable) para separar lo que sube EN SILENCIO (volumen normal = joya escondida) de
@@ -5603,7 +5857,7 @@ def _spark(vals, w=70, h=20, color=None, sw=1.4):
 
 
 def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred, flow=None, bt=None,
-               dd=None, dd_meta=None, plan=None, fx=None, long_src="", ai_text=None, leaders=None, leaders_n=0, bt2=None, heatmap=None, scores=None, probs=None, season=None, early=None, sector_breadth=None, meanrev=None, nq_close=None, fg_idx=None, spy_flow=None, watch=None, giro=None, desks=None, dix=None, suelo_pre=None, centinela=None, graduados=None, daily=None, ia_auto=None, tau=None, analogos=None, es_fut=None, options=None):
+               dd=None, dd_meta=None, plan=None, fx=None, long_src="", ai_text=None, leaders=None, leaders_n=0, bt2=None, heatmap=None, scores=None, probs=None, season=None, early=None, sector_breadth=None, meanrev=None, nq_close=None, fg_idx=None, spy_flow=None, watch=None, giro=None, desks=None, dix=None, suelo_pre=None, centinela=None, graduados=None, daily=None, ia_auto=None, tau=None, analogos=None, es_fut=None, options=None, despertares=None):
     rank = {"leading": 0, "weakening": 1, "improving": 2, "lagging": 3}
     ranked = sorted(rrg.items(), key=lambda kv: (rank[kv[1]["quad"]], -kv[1]["mom"]))
     last_date = df.index[-1].date()
@@ -5751,6 +6005,46 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                 + scard("Regimen macro", regime["label"].split(" / ")[0], "#5B8CFF", f"{len(leadnow)} sectores liderando")
                 + "</div>")
     verdict_pos = len(html)                       # aqui se insertara el "Veredicto de hoy" (se construye mas abajo)
+    # ---- COBERTURA EUR/USD: en la PRIMERA PANTALLA (antes estaba enterrada en el desplegable "El
+    #      porqué"). Operas en euros activos en dólares: la divisa te come o te regala rentabilidad
+    #      sin que hagas nada, así que la lectura tiene que estar a la vista, no a tres clics. ----
+    if fx:
+        _eu_fuerte = fx["strong"]
+        _fxcol = "#F4607A" if _eu_fuerte else "#2FD08A"
+        _fxtrend = "Euro fuerte / dólar débil" if _eu_fuerte else "Dólar fuerte / euro débil"
+        if _eu_fuerte and fx["pos"] > 60:
+            _hedge = ("Euro fuerte y caro (cerca de máximos de 52s): es cuando <b>más conviene cubrir</b> tus "
+                      "activos en dólares. Usa ETFs con clase <b>EUR hedged</b> o reduce exposición neta al dólar.")
+            _hcol = "#F4607A"; _hlab = "Cobertura: ALTA prioridad"
+        elif _eu_fuerte:
+            _hedge = ("El euro sube pero no está caro: cobertura <b>moderada</b>. Puedes cubrir una parte e ir "
+                      "ajustando si rompe la media de 200 al alza con fuerza.")
+            _hcol = "#F4B740"; _hlab = "Cobertura: media"
+        else:
+            _hedge = ("Dólar fuerte: te da <b>viento a favor</b> al convertir a euros, así que cubrir es poco "
+                      "urgente. Vigila un giro del euro (cruce de la media de 50 sobre la de 200).")
+            _hcol = "#2FD08A"; _hlab = "Cobertura: baja prioridad"
+        _sp = fx["spark"]
+        _fx_spark = ""
+        if len(_sp) > 2:
+            _lo, _hi = min(_sp), max(_sp); _rg = (_hi - _lo) or 1e-9
+            _pts = " ".join(f"{200*i/(len(_sp)-1):.1f},{34-2-(34-4)*(v-_lo)/_rg:.1f}" for i, v in enumerate(_sp))
+            _fx_spark = (f"<svg width='100%' height='34' viewBox='0 0 200 34' preserveAspectRatio='none'>"
+                         f"<polyline points='{_pts}' fill='none' stroke='{_fxcol}' stroke-width='1.5'/></svg>")
+        html.append("<div class='panel full'><h2>💱 Cobertura EUR/USD — la divisa que te come (o te regala) rentabilidad</h2>"
+                    f"<div style='background:{_hcol}18;border:1px solid {_hcol}55;border-radius:7px;padding:8px 11px;margin-bottom:8px'>"
+                    f"<b style='color:{_hcol};font-size:13px'>{_hlab}</b>"
+                    f"<div style='font-size:11.5px;color:#B9C6D8;margin-top:3px'>{_hedge}</div></div>"
+                    + _fx_spark +
+                    "<div style='display:flex;flex-wrap:wrap;gap:6px 20px;font-size:11.5px;margin-top:4px'>"
+                    f"<span>EUR/USD <b style='color:{_fxcol};font-size:13px'>{fx['last']}</b></span>"
+                    f"<span style='color:#8FA3C0'>medias 50/200 <b style='color:#CDE3FF'>{fx['ma50']} / {fx['ma200']}</b></span>"
+                    f"<span style='color:#8FA3C0'>cruce <b style='color:#CDE3FF'>{fx['cross']}</b></span>"
+                    f"<span style='color:#8FA3C0'>1m/3m/6m <b style='color:#CDE3FF'>{_pm(fx['roc1m'])} / {_pm(fx['roc3m'])} / {_pm(fx['roc6m'])}</b></span>"
+                    f"<span style='color:#8FA3C0'>rango 52s <b style='color:#CDE3FF'>{fx['lo52']}–{fx['hi52']} ({fx['pos']}%)</b></span>"
+                    f"<span style='color:#8FA3C0'>tendencia <b style='color:{_fxcol}'>{_fxtrend}</b></span></div>"
+                    "<div class='note' style='color:#5E708A;margin-top:7px'>La dirección del cambio no se puede predecir; esto es la "
+                    "lectura técnica actual y su implicación para tu cartera en dólares, no una previsión. No es asesoramiento.</div></div>")
     # ---- RELOJ DEL CICLO ECONOMICO ----
     try:
         cyc = compute_cycle_phase(rrg, scores or [])
@@ -6435,29 +6729,46 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
     if season:
         idx_names = list(season.keys())
         base_rows = season[idx_names[0]]["rows"]
-        def se_cell(st):
+        def se_cell(st, invert=False):
+            # invert=True para el VIX: ahi "subir" es MIEDO subiendo, o sea malo para bolsa. Sin esta
+            # inversion el panel pintaria de verde una quincena en la que historicamente se dispara
+            # la volatilidad — justo al reves de lo que significa.
             if not st or st.get("pup") is None:
                 return "<td class='se-c' style='color:#3A4658'>—</td>"
-            pcol = "#2FD08A" if st["pup"] >= 60 else "#F4B740" if st["pup"] >= 50 else "#F4607A"
-            acol = "#9FB0C8" if st["avg"] is None else ("#7FE0B0" if st["avg"] >= 0 else "#F49AAC")
-            return (f"<td class='se-c'><span class='se-pup' style='color:{pcol}'>{st['pup']}%</span>"
+            p = st["pup"]
+            if invert:
+                pcol = "#F4607A" if p >= 60 else "#F4B740" if p >= 50 else "#2FD08A"
+                acol = "#9FB0C8" if st["avg"] is None else ("#F49AAC" if st["avg"] >= 0 else "#7FE0B0")
+            else:
+                pcol = "#2FD08A" if p >= 60 else "#F4B740" if p >= 50 else "#F4607A"
+                acol = "#9FB0C8" if st["avg"] is None else ("#7FE0B0" if st["avg"] >= 0 else "#F49AAC")
+            return (f"<td class='se-c'><span class='se-pup' style='color:{pcol}'>{p}%</span>"
                     f"<span class='se-avg' style='color:{acol}'>{st['avg']:+.2f}%</span></td>")
+        _es_vix = {n: ("VIX" in n.upper()) for n in idx_names}
         head = "".join(f"<th class='se-c'>{esc(n)}</th>" for n in idx_names)
         body = ""
         for i, base in enumerate(base_rows):
             tag = "<span class='se-now'>ahora</span>" if i == 0 else ("<span class='se-next'>próxima</span>" if i == 1 else "")
-            cells = "".join(se_cell(season[n]["rows"][i] if i < len(season[n]["rows"]) else None) for n in idx_names)
+            cells = "".join(se_cell(season[n]["rows"][i] if i < len(season[n]["rows"]) else None, invert=_es_vix[n]) for n in idx_names)
             rowcls = " class='se-hi'" if i <= 1 else ""
             body += f"<tr{rowcls}><td class='se-l'>{base['label']}{tag}</td>{cells}</tr>"
         yrs = " · ".join(f"{n} {season[n]['years']}a" for n in idx_names)
-        html.append("<div class='panel full'><h2>Estacionalidad por media-quincena (S&P · Nasdaq · Russell)</h2>"
+        _vix_on = any(_es_vix.values())
+        html.append("<div class='panel full'><h2>Estacionalidad por media-quincena (S&amp;P · Nasdaq · Russell"
+                    + (" · VIX" if _vix_on else "") + ")</h2>"
                     "<div class='note'>De cada media-quincena (1ª mitad = días 1–15, 2ª = 16–fin), <b>% de años que cerró en positivo</b> "
-                    "y <b>retorno medio</b>, para los tres índices. <b style='color:#2FD08A'>Verde</b> = quincena históricamente alcista; "
+                    "y <b>retorno medio</b>. <b style='color:#2FD08A'>Verde</b> = quincena históricamente alcista; "
                     "<b style='color:#F4607A'>rojo</b> = floja. Es un <b>viento de fondo</b> probabilístico, no una señal de entrada. "
                     f"Histórico: {yrs}.</div>"
-                    f"<table class='se'><tr><th class='se-l'></th>{head}</tr>{body}</table>"
+                    + ("<div class='note' style='color:#F4B740'>⚠ La columna <b>VIX (miedo)</b> se lee AL REVÉS: ahí el % es el de años en que "
+                       "el VIX <b>subió</b>, y que suba el miedo suele ser malo para la bolsa. Por eso sus colores van invertidos: "
+                       "<b style='color:#2FD08A'>verde = el miedo baja</b> (mercado tranquilo), <b style='color:#F4607A'>rojo = el miedo sube</b>. "
+                       "El patrón clásico del VIX es suelo en julio y pico en octubre — si la quincena que viene es roja en el VIX, "
+                       "es un aviso de que suele venir más volatilidad, no de que el mercado vaya a caer sí o sí.</div>" if _vix_on else "")
+                    + f"<table class='se'><tr><th class='se-l'></th>{head}</tr>{body}</table>"
                     "<div class='note' style='margin-top:8px'>El Russell (small caps) y el Nasdaq suelen tener su patrón propio "
-                    "(p. ej. fuerza de fin de año en small caps). Por eso conviene mirar el índice del activo que vas a tocar.</div></div>")
+                    "(p. ej. fuerza de fin de año en small caps). Por eso conviene mirar el índice del activo que vas a tocar. "
+                    "No es asesoramiento.</div></div>")
 
     # ---- PUNTUACION (SCORING): el entregable de 5 minutos ----
     # historico para "% desde que entro" (racha continua; reinicia si sale y vuelve) — disponible para scoring Y cartera
@@ -7464,40 +7775,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                     "El <b>×N vol</b> es el volumen de hoy frente a su media de 20 sesiones; <b>🔼</b> = ruptura al alza con volumen (≥1.3×). "
                     "Las <b>divergencias</b> (precio y dinero en sentidos opuestos) avisan antes que el precio.</div>"
                     + div_html + "".join(flow_rows) + "</div>")
-    # panel de cobertura EUR/USD (avanzado)
-    if fx:
-        euro_strong = fx["strong"]
-        fxcol = "#F4607A" if euro_strong else "#2FD08A"
-        fxtrend = "Euro fuerte / dólar débil" if euro_strong else "Dólar fuerte / euro débil"
-        # recomendacion de cobertura segun fuerza del euro
-        if euro_strong and fx["pos"] > 60:
-            hedge = ("Euro fuerte y caro (cerca de máximos de 52s): es cuando <b>más conviene cubrir</b> tus "
-                     "activos en dólares. Usa ETFs con clase <b>EUR hedged</b> o reduce exposición neta al dólar.")
-            hcol = "#F4607A"; hlab = "Cobertura: ALTA prioridad"
-        elif euro_strong:
-            hedge = ("El euro sube pero no está caro: cobertura <b>moderada</b>. Puedes cubrir una parte e ir "
-                     "ajustando si rompe la media de 200 al alza con fuerza.")
-            hcol = "#F4B740"; hlab = "Cobertura: media"
-        else:
-            hedge = ("Dólar fuerte: te da <b>viento a favor</b> al convertir a euros, así que cubrir es poco "
-                     "urgente. Vigila un giro del euro (cruce de la media de 50 sobre la de 200).")
-            hcol = "#2FD08A"; hlab = "Cobertura: baja prioridad"
-        sp = fx["spark"]
-        fx_spark = ""
-        if len(sp) > 2:
-            lo_, hi_ = min(sp), max(sp); rg = (hi_ - lo_) or 1e-9
-            pts = " ".join(f"{200*i/(len(sp)-1):.1f},{34-2-(34-4)*(v-lo_)/rg:.1f}" for i, v in enumerate(sp))
-            fx_spark = f"<svg width='100%' height='34' viewBox='0 0 200 34' preserveAspectRatio='none'><polyline points='{pts}' fill='none' stroke='{fxcol}' stroke-width='1.5'/></svg>"
-        html.append("<div class='panel'><h2>Cobertura EUR/USD</h2>" + fx_spark +
-                    f"<div class='kv'><span>EUR/USD</span><b style='color:{fxcol}'>{fx['last']}</b></div>"
-                    f"<div class='kv'><span>Media 50 / 200</span><b>{fx['ma50']} / {fx['ma200']}</b></div>"
-                    f"<div class='kv'><span>Cruce de medias</span><b>{fx['cross']}</b></div>"
-                    f"<div class='kv'><span>Variación 1m / 3m / 6m</span><b>{_pm(fx['roc1m'])} / {_pm(fx['roc3m'])} / {_pm(fx['roc6m'])}</b></div>"
-                    f"<div class='kv'><span>Rango 52 semanas</span><b>{fx['lo52']}–{fx['hi52']} ({fx['pos']}%)</b></div>"
-                    f"<div class='kv'><span>Tendencia</span><b style='color:{fxcol}'>{fxtrend}</b></div>"
-                    f"<div class='note' style='margin-top:8px;color:{hcol}'><b>{hlab}.</b> {hedge}</div>"
-                    "<div class='note' style='color:#5E708A'>La dirección del cambio no se puede predecir; esto es la "
-                    "lectura técnica actual y su implicación para tu cartera en dólares, no una previsión.</div></div>")
+    # (el panel de cobertura EUR/USD se movió arriba, a la primera pantalla)
     html.append("</div>")
     # fila completa: ranking enriquecido
     html.append("<div class='panel full'><h2>Ranking por cuadrante</h2>" + table + "</div>")
@@ -8715,6 +8993,27 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                 sd += (f"<div style='margin-top:6px;font-size:11px'>EL BOTE: en el cubo actual, prob. {e['p']}% y media {e['avg']:+.1f}% a 4 sem → "
                        f"tamaño orientativo ¼-Kelly ≈ <b style='color:{CYN}'>{min(e['kelly4'], 3.0):.1f}%</b> de cartera (tope 3%), "
                        "en <b>contado</b>, nunca promediando el corto.</div>")
+            # --- ANÁLOGOS DE FLUJO: cuando la condicion "cae + sale dinero N sesiones seguidas" ya paso
+            #     antes, ¿que hizo el precio despues? Contexto, no señal (el flujo sigue confirmando el viernes).
+            an = dk.get("analogos")
+            if an and an.get("filas"):
+                _act = (f"<b style='color:{AMB}'>◄ ACTIVA HOY</b> (racha {an['racha_hoy']} sesiones, CMF {an['cmf_hoy']:+.3f})"
+                        if an.get("activa") else
+                        f"<span style='color:#667'>no activa hoy · última vez {an.get('ultima') or '—'}</span>")
+                sd += (f"<div style='color:#777;font-size:10px;letter-spacing:1px;margin:8px 0 3px'>ANÁLOGOS DE FLUJO — "
+                       f"{dk['sym']} CAE + sale dinero de {an['flujo']} ×{an['n_ses']} sesiones seguidas · {an['casos']} casos · {_act}</div>"
+                       "<table style='width:100%;font-size:11px'><tr style='color:#777'><td>DESPUÉS</td><td class='r'>SUBIÓ</td>"
+                       "<td class='r'>IC 95%</td><td class='r'>MEDIA</td><td class='r'>MEDIANA</td><td class='r'>N</td></tr>")
+                for f in an["filas"]:
+                    _c = GRN if f["p"] >= 60 else (RED if f["p"] <= 40 else AMB)
+                    sd += (f"<tr><td>T+{f['h']}</td><td class='r' style='color:{_c}'><b>{f['p']}%</b></td>"
+                           f"<td class='r' style='color:#667'>{f['lo']}–{f['hi']}%</td>"
+                           f"<td class='r'>{_fp(f['avg'])}</td><td class='r'>{_fp(f['med'])}</td>"
+                           f"<td class='r' style='color:#667'>{f['n']}</td></tr>")
+                sd += ("</table><div style='font-size:10px;color:#666;margin-top:3px'>Frecuencia histórica sobre TU serie, "
+                       "<b>no una predicción</b>: mira el IC y la N antes que el % central. El flujo se mide con el CMF "
+                       "(dice «sale dinero», <b>no</b> «vendió el minorista»: ese dato es de pago y no lo tenemos). "
+                       "Es contexto para entender el momento, no un disparador — la ejecución la sigue mandando el cierre del viernes.</div>")
             sd += ("<div style='font-size:10px;color:#666;margin-top:8px'>REGLAS DE LA PARTIDA: ① " + _cfg["veh"] + ". "
                    "② La mesa son frecuencias in-sample con IC ancho, no una promesa. ③ Mano fuerte sin flujo (CMF sangrando) = proyecto, no mano: espera el cierre semanal. "
                    "④ " + _cfg["riesgo"] + ".</div>")
@@ -9090,6 +9389,112 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                     "<div class='note' style='margin-top:8px;color:#5E708A'>Ritual de publicación del sábado: 1) genera el terminal con el cierre del viernes → "
                     "2) descarga tarjeta + PDF → 3) tarjeta a X/Telegram por la mañana, PDF a Substack → 4) mismo formato cada semana: la constancia ES el producto. "
                     "Recuerda el marco: análisis público NO personalizado, con posiciones propias declaradas.</div></div>")
+        # ============ LOS 3 BLOQUES DEL RADAR DE ANTICIPACIÓN ============
+        # Lo que nadie mas publica: la ficha FECHADA con sus huellas y su nivel de invalidacion,
+        # la cadena de despertares detectados, y el libro con la tasa base — fallos incluidos.
+        if despertares:
+            _dsp = despertares
+            # ---------- BLOQUE 1: FICHAS DE DESPERTAR (activas) ----------
+            _act = _dsp.get("activas") or []
+            _b1 = ("<div class='note'>Cada ficha se congela el día que el sistema detecta el despertar, con "
+                   "<b>las huellas que se cumplieron</b> y <b>el nivel que la invalida</b> — declarado ANTES de saber el resultado. "
+                   "No es una recomendación: es un registro. La ejecución sigue siendo tuya y con el cierre del viernes.</div>")
+            if _act:
+                for _a in _act[:8]:
+                    _rc = RED if _a.get("roto") else (GRN if (_a.get("ret") or 0) > 0 else GRY)
+                    _hu = "".join(f"<li style='margin:1px 0'>{h}</li>" for h in (_a.get("huellas") or [])) or "<li>—</li>"
+                    _vs = (f" · vs {BENCH} <b style='color:{GRN if (_a.get('vs') or 0) > 0 else RED}'>{_a['vs']:+.1f}</b>"
+                           if _a.get("vs") is not None else "")
+                    _b1 += (f"<div style='border-left:3px solid {_rc};background:#0D111A;border-radius:6px;padding:8px 10px;margin:7px 0'>"
+                            f"<div style='display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px'>"
+                            f"<span><b style='color:{CYN};font-size:14px'>{_a['sym']}</b> "
+                            f"<span style='font-size:10px;color:#8FA3C0'>{_a.get('fase')} · ficha del {_a.get('date')}</span></span>"
+                            f"<span style='font-size:11px'>desde la ficha <b style='color:{_rc}'>{_a.get('ret', 0):+.1f}%</b>{_vs}</span></div>"
+                            f"<div style='font-size:11px;color:#93A4BC;margin-top:3px'>"
+                            f"caída {_a.get('caida')}% desde máximos · CMF {_a.get('cmf')} · silencio {_a.get('vr')}× · patrón {_a.get('pts')}/10</div>"
+                            f"<ul style='margin:4px 0 2px 16px;padding:0;font-size:11px;color:#B9C6D8'>{_hu}</ul>"
+                            f"<div style='font-size:11px;margin-top:3px'>"
+                            + (f"<b style='color:{RED}'>✗ INVALIDADA</b>: perdió {_a.get('inval')} — la base se rompió, la tesis queda anulada."
+                               if _a.get("roto") else
+                               f"<span style='color:#8FA3C0'>Se invalida si pierde <b style='color:{AMB}'>{_a.get('inval')}</b></span>")
+                            + f" · <span style='color:#667'>madura en {_a.get('faltan')} sesiones</span></div></div>")
+            else:
+                _b1 += "<div class='note'>Ninguna ficha abierta ahora mismo: no hay ningún sector en fase de despertar sin sangrar. Es información, no un fallo.</div>"
+            html.append("<div class='panel full'><h2>🎯 FICHAS DE DESPERTAR — lo que el sistema ve antes que el titular</h2>" + _b1 + "</div>")
+
+            # ---------- BLOQUE 2: LA CADENA ----------
+            _cad = _dsp.get("cadena") or []
+            if _cad:
+                _b2 = ("<div class='note'>La secuencia de despertares que el sistema fue detectando, en orden. "
+                       "Aquí es donde se ve —o no— la ventaja: la fecha de la ficha frente a lo que hizo el precio después. "
+                       "Nada se borra; los que salieron mal siguen en la lista.</div>"
+                       "<div class='scrollx'><table style='width:100%;font-size:11px;min-width:520px'>"
+                       "<tr style='color:#777;font-size:10px'><td>FICHA</td><td>SECTOR</td><td>FASE</td>"
+                       f"<td class='r'>CAÍDA</td><td class='r'>A 4 SEM</td><td class='r'>{BENCH}</td><td class='r'>VS</td><td>DESENLACE</td></tr>")
+                for _c in _cad:
+                    _cc = GRN if _c.get("gana") else RED
+                    _des = ("<span style='color:#F4607A'>invalidada (perdió su nivel)</span>" if _c.get("roto")
+                            else ("<span style='color:#2FD08A'>despertar confirmado</span>" if _c.get("gana")
+                                  else "<span style='color:#93A4BC'>no despegó</span>"))
+                    _vsx = (f"<b style='color:{GRN if (_c.get('vs') or 0) > 0 else RED}'>{_c['vs']:+.1f}</b>"
+                            if _c.get("vs") is not None else "—")
+                    _b2 += (f"<tr><td style='color:#8FA3C0'>{_c.get('date')}</td>"
+                            f"<td><b style='color:{CYN}'>{_c['sym']}</b></td>"
+                            f"<td style='color:#93A4BC;font-size:10px'>{_c.get('fase')}</td>"
+                            f"<td class='r' style='color:#93A4BC'>{_c.get('caida')}%</td>"
+                            f"<td class='r'><b style='color:{_cc}'>{_c.get('ret', 0):+.1f}%</b></td>"
+                            f"<td class='r' style='color:#93A4BC'>{('%+.1f' % _c['ret_b']) if _c.get('ret_b') is not None else '—'}</td>"
+                            f"<td class='r'>{_vsx}</td><td>{_des}</td></tr>")
+                _b2 += "</table></div>"
+                html.append("<div class='panel full'><h2>🔗 LA CADENA — los despertares detectados, en orden</h2>" + _b2 + "</div>")
+
+            # ---------- BLOQUE 3: EL LIBRO ----------
+            _lb = _dsp.get("libro")
+            _b3 = ("<div class='note'>La tasa base del radar de anticipación, medida <b>fuera de muestra</b>: cada ficha se evalúa sola "
+                   "a las 4 semanas, gane o pierda, con el resultado recalculado siempre desde precios reales. "
+                   "Esto es lo que convierte el sistema en algo creíble — y lo que te protege: sin libro, cualquier acierto es una anécdota.</div>")
+            if _lb:
+                _pc = GRN if _lb["p"] >= 60 else (AMB if _lb["p"] >= 45 else RED)
+                _b3 += (f"<div style='display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;margin:8px 0'>"
+                        f"<div><span style='font-size:26px;font-weight:700;color:{_pc}'>{_lb['p']}%</span>"
+                        f"<span style='font-size:11px;color:#8FA3C0'> de fichas en positivo a 4 semanas</span></div>"
+                        f"<div style='font-size:11px;color:#667'>IC 95% {_lb['lo']}–{_lb['hi']}% · n={_lb['n']} "
+                        f"({_lb['gan']} aciertos / {_lb['n'] - _lb['gan']} fallos)</div></div>"
+                        f"<div style='font-size:12px'>Media <b>{_lb['avg']:+.1f}%</b> · mediana <b>{_lb['med']:+.1f}%</b>"
+                        + (f" · vs {BENCH} <b style='color:{GRN if _lb['avg_vs'] > 0 else RED}'>{_lb['avg_vs']:+.1f} pp</b>" if _lb.get("avg_vs") is not None else "")
+                        + f" · invalidadas <b style='color:{RED}'>{_lb['rotas']}</b> de {_lb['n']}</div>")
+                _pf = _lb.get("porfase") or {}
+                if _pf:
+                    _fil = ""
+                    for _fn, _fv in _pf.items():
+                        _fc = GRN if _fv["p"] >= 60 else (AMB if _fv["p"] >= 45 else RED)
+                        _fil += (f"<tr><td style='color:#CDE3FF'>{'🌅' if _fn == 'DESPERTANDO' else '🌱'} {_fn}</td>"
+                                 f"<td class='r'><b style='color:{_fc}'>{_fv['p']}%</b></td>"
+                                 f"<td class='r'>{_fv['avg']:+.1f}%</td>"
+                                 f"<td class='r' style='color:#667'>{_fv['gan']}/{_fv['n']}</td></tr>")
+                    _b3 += ("<div style='color:#777;font-size:10px;letter-spacing:1px;margin:10px 0 3px'>¿COMPENSA ENTRAR TEMPRANO? — "
+                            "RENDIMIENTO POR FASE DE LA FICHA</div>"
+                            "<table style='width:100%;font-size:11.5px'><tr style='color:#777;font-size:10px'>"
+                            "<td>FASE AL ABRIR LA FICHA</td><td class='r'>ACIERTO</td><td class='r'>MEDIA 4 SEM</td><td class='r'>N</td></tr>"
+                            + _fil + "</table>"
+                            "<div style='font-size:10px;color:#666;margin-top:3px'>Tu tesis dice que el dinero está en entrar "
+                            "<b>en el giro</b> (🌅 DESPERTANDO) o incluso antes (🌱 PRE-DESPERTAR), no cuando el movimiento ya está maduro. "
+                            "Esta tabla es la que la confirma o la desmiente con tus propios datos. Con pocas fichas todavía no dice nada: "
+                            "déjala acumular.</div>")
+                if not _lb["maduro"]:
+                    _b3 += (f"<div style='background:{AMB}18;border:1px solid {AMB}55;border-radius:6px;padding:7px 9px;margin-top:8px;font-size:11px;color:{AMB}'>"
+                            f"⚠ Muestra corta: {_lb['n']} fichas maduras (el IC va de {_lb['lo']}% a {_lb['hi']}%, que es enorme). "
+                            "<b>Hasta las ~20 no publiques esto como track record</b>: con esta N, el número central no significa casi nada. "
+                            "Sigue acumulando y deja que el libro hable solo.</div>")
+            else:
+                _b3 += ("<div class='note'>Todavía no hay ninguna ficha madura (hacen falta 4 semanas desde la primera). "
+                        "El libro empieza a contar desde hoy: es normal que esté vacío al principio.</div>")
+            _b3 += ("<div style='font-size:10px;color:#666;margin-top:8px'>Honestidad del método: la ficha se congela el día de la detección "
+                    "y el resultado se recalcula desde precios reales en cada build, así que no hay números guardados que puedan maquillarse. "
+                    "Se cuentan TODAS las fichas, también las que salieron mal. El edge demostrado de este sistema es "
+                    "<b>reducir drawdown, no batir al mercado</b>: la promesa honesta es anticipación y disciplina de salida. "
+                    "Contenido informativo, NO asesoramiento personalizado (MiFID II / criterios CNMV).</div>")
+            html.append("<div class='panel full'><h2>📒 EL LIBRO — la tasa base, con los fallos dentro</h2>" + _b3 + "</div>")
         # --- HISTORIAL COMPLETO: todas las entradas que el sistema ha dado, episodio a episodio, PERDIDAS INCLUIDAS ---
         try:
             _eps = episodios_cartera(_recs_e, df=df, cur_week=_cur_week)
@@ -9667,6 +10072,20 @@ def main():
     rut_se = compute_seasonality(rut_close) if rut_close is not None else None
     if rut_se:
         season["Russell 2000"] = rut_se
+    # VIX: la estacionalidad del MIEDO. OJO con la fuente: sin fallback a ETF, porque VIXY y compania
+    # son futuros de VIX (sufren contango y decaen brutalmente) — su estacionalidad NO es la del VIX
+    # al contado y meteria un dato falso. Solo Stooq -> Yahoo, o no se pinta.
+    try:
+        vix_close, _vsrc, _ = _fetch_long("^vix", None, "^VIX")
+        vix_close, _ = refrescar_con_yahoo(vix_close, None, "^VIX")
+        vix_se = compute_seasonality(vix_close) if vix_close is not None else None
+        if vix_se:
+            season["VIX (miedo)"] = vix_se
+            print(f"  Estacionalidad VIX: {vix_se['years']} años ({_vsrc})")
+        else:
+            _avisar("season.vix", "sin histórico suficiente del VIX: la columna de estacionalidad del miedo no se pinta")
+    except Exception as _e_vix:
+        _avisar("season.vix", f"VIX no disponible para estacionalidad: {_e_vix}")
     if not season:
         season = None
     fx = fetch_fx()
@@ -9680,6 +10099,17 @@ def main():
         _suelo = compute_suelo(df, rrg, scores, flow, meanrev)
     except Exception:
         _suelo = None
+    _despertares = None
+    try:
+        _ult_cierre = str((daily.get(BENCH).index[-1].date()) if daily.get(BENCH) is not None else df.index[-1].date())
+        _despertares = update_despertares(_suelo, daily, _ult_cierre, bench=BENCH)
+        if _despertares:
+            _lb = _despertares.get("libro")
+            print(f"  📒 Libro de despertares: {len(_despertares['activas'])} fichas activas · "
+                  + (f"{_lb['n']} maduras, acierto {_lb['p']}% (IC {_lb['lo']}-{_lb['hi']}%)" if _lb else "aún ninguna madura"))
+    except Exception as _e_dsp:
+        _avisar("despertares", f"libro de despertares no disponible: {_e_dsp}")
+        _despertares = None
     _graduados = None
     try:
         _graduados = compute_graduados(df, rrg, flow)
@@ -9711,6 +10141,20 @@ def main():
             _dk = compute_rebote_desk(df, daily, rrg, flow, scores, leaders, _giro,
                                       prefs=_dc["prefs"], lead_keys=_dc.get("lead_keys"), desk_id=_dc["id"])
             if _dk:
+                # análogos de flujo: para SEMIS se mide el precio de SOXX contra el flujo de SMH
+                # (el par del post de r/Daytrading); para el resto, el propio ETF del desk.
+                try:
+                    _sy = _dk.get("sym")
+                    if _sy in ("SMH", "SOXX"):
+                        # par del post: PRECIO de SOXX contra el FLUJO de SMH (si ambos llegaron)
+                        _pp = "SOXX" if "SOXX" in (daily or {}) else _sy
+                        _pf = "SMH" if "SMH" in (daily or {}) else _sy
+                    else:
+                        _pp = _pf = _sy
+                    if _pp in (daily or {}) and _pf in (daily or {}):
+                        _dk["analogos"] = compute_analogos_flujo(daily, _pp, _pf, n_sesiones=2)
+                except Exception:
+                    _dk["analogos"] = None
                 _desks.append(_dk)
         except Exception:
             continue
@@ -9803,7 +10247,7 @@ def main():
             print("\nAviso enviado.")
 
     html = build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred, flow=flow, bt=bt,
-                      dd=dd, dd_meta=dd_meta, plan=plan, fx=fx, long_src=long_src, ai_text=ai_text, leaders=leaders, leaders_n=leaders_n, bt2=bt2, heatmap=heatmap, scores=scores, probs=probs, season=season, early=early, sector_breadth=sector_breadth, meanrev=meanrev, nq_close=nq_close, fg_idx=fg_idx, spy_flow=spy_flow, watch=watch, giro=_giro, desks=_desks, dix=_dix, suelo_pre=_suelo, centinela=_centinela, graduados=_graduados, daily=daily, ia_auto=ia_auto, tau=tau, analogos=analogos, es_fut=es_fut, options=options)
+                      dd=dd, dd_meta=dd_meta, plan=plan, fx=fx, long_src=long_src, ai_text=ai_text, leaders=leaders, leaders_n=leaders_n, bt2=bt2, heatmap=heatmap, scores=scores, probs=probs, season=season, early=early, sector_breadth=sector_breadth, meanrev=meanrev, nq_close=nq_close, fg_idx=fg_idx, spy_flow=spy_flow, watch=watch, giro=_giro, desks=_desks, dix=_dix, suelo_pre=_suelo, centinela=_centinela, graduados=_graduados, daily=daily, ia_auto=ia_auto, tau=tau, analogos=analogos, es_fut=es_fut, options=options, despertares=_despertares)
     os.makedirs(SITE_DIR, exist_ok=True)
     # copiar archivos estaticos (iconos, manifest, service worker) al sitio
     if os.path.isdir(STATIC_DIR):
