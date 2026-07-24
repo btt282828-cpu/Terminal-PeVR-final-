@@ -138,6 +138,25 @@ SINTETICOS = {
     "S-AMPLITUD": {"nombre": "Amplitud real", "corto": "Sint. Amplitud",
                    "members": ["RSP", "IWM"],
                    "desc": "S&P equiponderado + small caps: ¿sube el mercado o solo cuatro gigantes? La subida estrecha es frágil"},
+    # === CASCADA DEL CAPEX DE IA: los eslabones por los que va bajando el dinero ===
+    # Un euro de capex de un hiperescalador NO llega a todos a la vez: primero paga el chip, luego la
+    # obra, luego la electricidad y al final la materia prima. Cada eslabon es un sintetico para poder
+    # ver EN QUE PUNTO de la cadena esta el dinero hoy y hacia donde se mueve. "orden" = posicion en la
+    # cadena (1 = arriba/inmediato, 4 = abajo/tardio). Solo LECTURA, como el resto de sinteticos.
+    # NOTA HONESTA: falta el eslabon de EQUIPOS (ASML/LRCX/AMAT). No hay ETF de equipos semi en tu
+    # universo UCITS, asi que habria que montarlo con acciones sueltas, al estilo del sintetico FIW.
+    "C1-SILICIO": {"nombre": "Cascada 1 · Silicio", "corto": "C1 Silicio", "grupo": "cascada", "orden": 1,
+                   "members": ["SMH", "SOXX"],
+                   "desc": "chips y memoria: el primer eslabón, se cobra al firmar el pedido"},
+    "C2-OBRA": {"nombre": "Cascada 2 · Obra y red", "corto": "C2 Obra", "grupo": "cascada", "orden": 2,
+                "members": ["PAVE", "GRID", "FIW", "CGW"],
+                "desc": "construcción, red eléctrica, agua y refrigeración del centro de datos"},
+    "C3-ENERGIA": {"nombre": "Cascada 3 · Energía", "corto": "C3 Energía", "grupo": "cascada", "orden": 3,
+                   "members": ["XLU", "URA", "XLE"],
+                   "desc": "la electricidad que se lo come todo: utilities, uranio y energía"},
+    "C4-MATERIA": {"nombre": "Cascada 4 · Materia prima", "corto": "C4 Materia", "grupo": "cascada", "orden": 4,
+                   "members": ["COPX", "XME", "SIL", "SLV"],
+                   "desc": "cobre, metales y plata: el último eslabón y el de MAYOR beta (apalancamiento operativo de las mineras)"},
 }
 CARTERA_PESO_MAX = 34   # tope de % por posicion en la cartera semanal; lo que no se reparte va a LIQUIDEZ
 # --- SECTORES EXPLOSIVOS: los que mas se mueven cuando rebotan (beta alta). El modo cazador de suelos
@@ -230,9 +249,9 @@ for _s in GRUPO_MATERIALES:  GRUPO[_s] = "materiales"
 for _s in GRUPO_IAINFRA:     GRUPO[_s] = "iainfra"
 for _s in GRUPO_INTERNAC:    GRUPO[_s] = "internac"
 for _s in GRUPO_REFUGIO:     GRUPO[_s] = "refugio"
-for _s in SINTETICOS:        GRUPO[_s] = "sintetico"
-GRUPO_NOMBRE = {"sector": "Sectores", "subsector": "Subsectores EE.UU.", "tech": "Tech e innovación", "limpia": "Energía limpia", "materiales": "Materiales y metales", "iainfra": "IA infraestructura", "internac": "Internacional", "refugio": "Macro / refugio", "sintetico": "Sintéticos"}
-GRUPO_ORDEN = ("sector", "subsector", "tech", "limpia", "materiales", "iainfra", "internac", "refugio", "sintetico")
+for _s in SINTETICOS:        GRUPO[_s] = SINTETICOS[_s].get("grupo", "sintetico")
+GRUPO_NOMBRE = {"sector": "Sectores", "subsector": "Subsectores EE.UU.", "tech": "Tech e innovación", "limpia": "Energía limpia", "materiales": "Materiales y metales", "iainfra": "IA infraestructura", "internac": "Internacional", "refugio": "Macro / refugio", "sintetico": "Sintéticos", "cascada": "Cascada IA"}
+GRUPO_ORDEN = ("sector", "subsector", "tech", "limpia", "materiales", "iainfra", "internac", "refugio", "sintetico", "cascada")
 
 # Clasificacion en 3 grupos para los paneles (selector del RRG y bloques de las tablas)
 GROUPS = {
@@ -733,6 +752,10 @@ NAMES = {
     "S-REFUGIO":("Sintético huida a seguridad (GLD+TLT+UUP)","Sint. Refugio","sintetico"),
     "S-CREDITO":("Sintético pulso del crédito (HYG+LQD+EMB) — el canario que avisa antes","Sint. Crédito","sintetico"),
     "S-AMPLITUD":("Sintético amplitud real (RSP+IWM) — ¿sube el mercado o solo cuatro gigantes?","Sint. Amplitud","sintetico"),
+    "C1-SILICIO":("Cascada IA 1 — Silicio (SMH+SOXX): el primer eslabón del capex","C1 Silicio","cascada"),
+    "C2-OBRA":("Cascada IA 2 — Obra y red (PAVE+GRID+FIW+CGW)","C2 Obra","cascada"),
+    "C3-ENERGIA":("Cascada IA 3 — Energía (XLU+URA+XLE)","C3 Energía","cascada"),
+    "C4-MATERIA":("Cascada IA 4 — Materia prima (COPX+XME+SIL+SLV): el eslabón de mayor beta","C4 Materia","cascada"),
 }
 QUAD = {
     "leading":  ("Lider","#2FD08A","Liderazgo confirmado"),
@@ -4911,7 +4934,49 @@ DESPERTARES_FILE = os.path.join(SEGUIMIENTO_DIR, "despertares.json")
 DESPERTARES_BAK = os.path.join(SEGUIMIENTO_DIR, "despertares.bak.json")
 
 
-def update_despertares(suelo, daily, close_date, bench="SPY"):
+def _sello_macro(df, rrg, flow, cascada=None):
+    """Foto del CONTEXTO MACRO en el momento de abrir una ficha. Se guarda con la ficha para que,
+    dentro de unos meses, el libro pueda responder solo: "los despertares de mineras funcionaron el
+    X% con el dolar cayendo y el Y% con el dolar subiendo". Sin esto, esa pregunta no se puede
+    responder nunca — y es justo la que decide si el semaforo macro aporta algo o es ruido."""
+    m = {}
+    try:
+        # DOLAR (UUP): viento en contra de materias primas y emergentes cuando sube
+        if rrg and "UUP" in rrg:
+            d = rrg["UUP"]
+            sube = d["quad"] in ("leading", "improving")
+            m["usd"] = "sube" if sube else "baja"
+            m["usd_ratio"] = round(float(d["ratio"]), 1)
+        cu = (flow or {}).get("UUP", {}).get("cmf")
+        if cu is not None:
+            m["usd_cmf"] = cu
+    except Exception:
+        pass
+    try:
+        # CHINA (FXI/KWEB): comprador marginal de cobre y metales
+        qs, cs = [], []
+        for s in ("FXI", "KWEB"):
+            if rrg and s in rrg:
+                qs.append(rrg[s]["quad"] in ("leading", "improving"))
+            c = (flow or {}).get(s, {}).get("cmf")
+            if c is not None:
+                cs.append(c)
+        if qs:
+            m["china"] = "fuerte" if sum(qs) >= max(1, len(qs) - 0) else ("mixta" if any(qs) else "floja")
+        if cs:
+            m["china_cmf"] = round(sum(cs) / len(cs), 3)
+    except Exception:
+        pass
+    try:
+        if cascada and cascada.get("lider"):
+            m["eslabon"] = cascada["lider"]
+            m["cascada"] = cascada.get("sentido")
+    except Exception:
+        pass
+    return m or None
+
+
+def update_despertares(suelo, daily, close_date, bench="SPY", macro=None):
     """LIBRO DE DESPERTARES — el registro de anticipación, fechado y falsable.
 
     Idea: cualquiera dice "compra uranio". Lo que nadie publica es "el dia X mi sistema marco URA
@@ -4976,7 +5041,8 @@ def update_despertares(suelo, daily, close_date, bench="SPY"):
                      "caida": (round(r["hi52"] - 100, 1) if r.get("hi52") is not None else None),
                      "cmf": r.get("cmf"), "sil": r.get("sil"), "vr": r.get("vr"),
                      "huellas": [h for h in (r.get("det") or [])][:4],
-                     "px0": round(px0, 2), "inval": inval, "cerrada": False})
+                     "px0": round(px0, 2), "inval": inval, "cerrada": False,
+                     "macro": macro})
         vetados.add(s)
     # limite de tamano: 200 fichas mas recientes
     if len(recs) > 200:
@@ -5060,13 +5126,24 @@ def update_despertares(suelo, daily, close_date, bench="SPY"):
                               "gan": sum(1 for c in sub if c["gana"]),
                               "p": int(round(100 * sum(1 for c in sub if c["gana"]) / len(sub))),
                               "avg": round(sum(c["ret"] for c in sub) / len(sub), 1)}
+        # DESGLOSE POR DOLAR: ¿de verdad los despertares (sobre todo de mineras) funcionan mejor con
+        # el dolar cayendo? Con el sello macro guardado en cada ficha, esto se RESPONDE en vez de
+        # suponerse. Es la unica forma de saber si el semaforo macro aporta o es ruido.
+        pordolar = {}
+        for est in ("baja", "sube"):
+            sub = [c for c in cerradas if (c.get("macro") or {}).get("usd") == est]
+            if sub:
+                pordolar[est] = {"n": len(sub),
+                                 "gan": sum(1 for c in sub if c["gana"]),
+                                 "p": int(round(100 * sum(1 for c in sub if c["gana"]) / len(sub))),
+                                 "avg": round(sum(c["ret"] for c in sub) / len(sub), 1)}
         libro = {"n": n, "gan": gan, "p": int(round(100 * p)),
                  "lo": int(round(100 * (ctr - rad))), "hi": int(round(100 * (ctr + rad))),
                  "avg": round(sum(c["ret"] for c in cerradas) / n, 1),
                  "med": round(med[n // 2], 1),
                  "avg_vs": (round(sum(vs_ok) / len(vs_ok), 1) if vs_ok else None),
                  "rotas": sum(1 for c in cerradas if c.get("roto")),
-                 "porfase": porfase,
+                 "porfase": porfase, "pordolar": pordolar,
                  "maduro": n >= 20}
     # DESPERTANDO primero: es la fase del giro, la que Pedro quiere cazar. Luego por patron y fecha.
     activas.sort(key=lambda r: (0 if r.get("fase") == "DESPERTANDO" else 1,
@@ -5762,6 +5839,61 @@ def compute_analogos_flujo(daily, sym_precio, sym_flujo=None, n_sesiones=2, hori
             "racha_hoy": int(racha.iloc[-1])}
 
 
+def compute_cascada(df, rrg, flow=None):
+    """MAPA DE LA CASCADA DEL CAPEX DE IA — ¿en qué eslabón está el dinero hoy?
+
+    Un euro de capex no llega a todos a la vez: paga primero el chip (C1), luego la obra (C2), la
+    electricidad (C3) y al final la materia prima (C4). Este panel mide la fuerza relativa y el flujo
+    de cada eslabón para VER la rotación en vez de suponerla.
+
+    Contexto, NO señal: los eslabones son sintéticos de solo lectura. La ejecución la sigue mandando
+    el flujo del viernes sobre los ETFs concretos."""
+    esl = sorted([(k, v) for k, v in SINTETICOS.items() if v.get("grupo") == "cascada"],
+                 key=lambda kv: kv[1].get("orden", 99))
+    if not esl or rrg is None:
+        return None
+    flow = flow or {}
+    filas = []
+    for key, cfg in esl:
+        d = rrg.get(key)
+        if d is None or key not in df.columns:
+            continue
+        s = df[key].dropna()
+        if len(s) < 13:
+            continue
+        def _r(n):
+            return (float(s.iloc[-1] / s.iloc[-1 - n] - 1) * 100) if len(s) > n else None
+        miembros = [m for m in cfg["members"] if m in df.columns]
+        cmfs = [flow[m]["cmf"] for m in miembros if flow.get(m, {}).get("cmf") is not None]
+        filas.append({
+            "key": key, "orden": cfg.get("orden", 99), "corto": cfg.get("corto", key),
+            "desc": cfg.get("desc", ""), "miembros": miembros,
+            "quad": d["quad"], "ratio": round(d["ratio"], 1), "mom": round(d["mom"], 1),
+            "dmom": round(d["dmom"], 2),
+            "r1": _r(1), "r4": _r(4), "r12": _r(12),
+            "cmf": (round(sum(cmfs) / len(cmfs), 3) if cmfs else None),
+            "n_cmf": len(cmfs),
+        })
+    if len(filas) < 2:
+        return None
+    # ¿QUIEN LIDERA? por fuerza relativa (ratio RRG)
+    lider = max(filas, key=lambda f: f["ratio"])
+    # ¿EL DINERO BAJA POR LA CADENA? Se compara el impulso (dmom) de la mitad ALTA (eslabones 1-2)
+    # con la mitad BAJA (3-4). Si abajo mejora mas que arriba, la cascada esta descendiendo.
+    alto = [f["dmom"] for f in filas if f["orden"] <= 2]
+    bajo = [f["dmom"] for f in filas if f["orden"] >= 3]
+    spread = None
+    sentido = "sin sentido claro"
+    if alto and bajo:
+        spread = round(sum(bajo) / len(bajo) - sum(alto) / len(alto), 2)
+        if spread > 0.5:
+            sentido = "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
+        elif spread < -0.5:
+            sentido = "el dinero SUBE hacia el principio (vuelve a chips)"
+    return {"filas": filas, "lider": lider["key"], "lider_corto": lider["corto"],
+            "spread": spread, "sentido": sentido}
+
+
 def compute_attention_radar(rrg, flow):
     """Cruza tendencia (RRG) con volumen relativo (proxy de atencion del MERCADO, no de prensa, pero capta
     la misma idea de forma fiable) para separar lo que sube EN SILENCIO (volumen normal = joya escondida) de
@@ -5857,7 +5989,7 @@ def _spark(vals, w=70, h=20, color=None, sw=1.4):
 
 
 def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred, flow=None, bt=None,
-               dd=None, dd_meta=None, plan=None, fx=None, long_src="", ai_text=None, leaders=None, leaders_n=0, bt2=None, heatmap=None, scores=None, probs=None, season=None, early=None, sector_breadth=None, meanrev=None, nq_close=None, fg_idx=None, spy_flow=None, watch=None, giro=None, desks=None, dix=None, suelo_pre=None, centinela=None, graduados=None, daily=None, ia_auto=None, tau=None, analogos=None, es_fut=None, options=None, despertares=None):
+               dd=None, dd_meta=None, plan=None, fx=None, long_src="", ai_text=None, leaders=None, leaders_n=0, bt2=None, heatmap=None, scores=None, probs=None, season=None, early=None, sector_breadth=None, meanrev=None, nq_close=None, fg_idx=None, spy_flow=None, watch=None, giro=None, desks=None, dix=None, suelo_pre=None, centinela=None, graduados=None, daily=None, ia_auto=None, tau=None, analogos=None, es_fut=None, options=None, despertares=None, cascada=None):
     rank = {"leading": 0, "weakening": 1, "improving": 2, "lagging": 3}
     ranked = sorted(rrg.items(), key=lambda kv: (rank[kv[1]["quad"]], -kv[1]["mom"]))
     last_date = df.index[-1].date()
@@ -6045,6 +6177,53 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                     f"<span style='color:#8FA3C0'>tendencia <b style='color:{_fxcol}'>{_fxtrend}</b></span></div>"
                     "<div class='note' style='color:#5E708A;margin-top:7px'>La dirección del cambio no se puede predecir; esto es la "
                     "lectura técnica actual y su implicación para tu cartera en dólares, no una previsión. No es asesoramiento.</div></div>")
+    # ---- MAPA DE LA CASCADA DEL CAPEX DE IA ----
+    if cascada and cascada.get("filas"):
+        _cAMB, _cGRN, _cRED, _cGRY, _cCYN = "#FFB000", "#00E676", "#FF5252", "#8A96A8", "#4CC2E0"
+        _cf = cascada["filas"]
+        _maxabs = max([abs(f["r4"]) for f in _cf if f["r4"] is not None] or [1]) or 1
+        _rows = ""
+        for f in _cf:
+            _ql, _qc = QUAD.get(f["quad"], (f["quad"], "#888"))[0], QUAD.get(f["quad"], ("", "#888"))[1]
+            _es_lider = (f["key"] == cascada["lider"])
+            _cmfc = _cGRY if f["cmf"] is None else (_cGRN if f["cmf"] > 0.05 else _cRED if f["cmf"] < -0.05 else _cGRY)
+            _cmft = "n/d" if f["cmf"] is None else f"{f['cmf']:+.2f}"
+            _w = int(round(100 * abs(f["r4"] or 0) / _maxabs))
+            _bc = _cGRN if (f["r4"] or 0) >= 0 else _cRED
+            _bar = (f"<div style='background:#0C1220;border-radius:3px;height:7px;width:100%;overflow:hidden'>"
+                    f"<div style='background:{_bc};height:7px;width:{_w}%'></div></div>")
+            _rows += (f"<tr style='{'background:#12203A' if _es_lider else ''}'>"
+                      f"<td style='padding:5px 6px'><b style='color:{_cCYN};font-size:12px'>{f['orden']}. {esc(f['corto'])}</b>"
+                      + ("<span style='color:#F4B740;font-size:9px;margin-left:5px'>◄ LIDERA</span>" if _es_lider else "")
+                      + f"<div style='font-size:10px;color:#7A8AA3;margin-top:1px'>{esc(', '.join(f['miembros']))}</div></td>"
+                      f"<td style='color:{_qc};font-size:11px'>{_ql}</td>"
+                      f"<td class='r' style='font-size:11px'>{f['ratio']}</td>"
+                      f"<td class='r' style='font-size:11px;color:{_cGRN if f['dmom'] > 0 else _cRED}'>{f['dmom']:+.2f}</td>"
+                      f"<td class='r' style='font-size:11px'>{('%+.1f%%' % f['r4']) if f['r4'] is not None else '—'}</td>"
+                      f"<td style='width:22%'>{_bar}</td>"
+                      f"<td class='r' style='color:{_cmfc};font-size:11px'>{_cmft}</td></tr>")
+        _sp = cascada.get("spread")
+        _spc = _cGRN if (_sp or 0) > 0.5 else (_cAMB if (_sp or 0) > -0.5 else "#8FA3C0")
+        html.append("<div class='panel full'><h2>🔗 Cascada del capex de IA — ¿en qué eslabón está el dinero?</h2>"
+                    "<div class='note'>Un euro de capex de un hiperescalador <b>no llega a todos a la vez</b>: primero paga el chip, "
+                    "luego la obra y la red, luego la electricidad, y al final la materia prima. Aquí ves por qué eslabón va el dinero "
+                    "<b>hoy</b> y hacia dónde se mueve, en vez de suponerlo. Todo el mundo dice «infraestructura»; lo interesante es "
+                    "que la <b>beta de verdad está al final de la cadena</b> (las mineras multiplican porque su coste no sube cuando "
+                    "sube el metal: apalancamiento operativo).</div>"
+                    f"<div style='background:{_spc}18;border:1px solid {_spc}55;border-radius:7px;padding:7px 10px;margin:7px 0;font-size:12px'>"
+                    f"Lidera ahora: <b style='color:{_cCYN}'>{esc(cascada['lider_corto'])}</b> · "
+                    f"<b style='color:{_spc}'>{esc(cascada['sentido'])}</b>"
+                    + (f" <span style='color:#7A8AA3;font-size:10px'>(impulso abajo − arriba: {_sp:+.2f})</span>" if _sp is not None else "")
+                    + "</div>"
+                    "<div class='scrollx'><table style='width:100%;font-size:11.5px;min-width:520px'>"
+                    "<tr style='color:#777;font-size:10px'><td>ESLABÓN</td><td>CUADRANTE</td><td class='r'>FUERZA</td>"
+                    "<td class='r'>Δ IMPULSO</td><td class='r'>4 SEM</td><td>·</td><td class='r'>FLUJO</td></tr>"
+                    + _rows + "</table></div>"
+                    "<div style='font-size:10px;color:#666;margin-top:7px'>⚠ Esto es <b>contexto, no señal</b>: los eslabones son "
+                    "cestas de solo lectura (no entran en scoring ni cartera). La cascada <b>no es limpia ni ordenada</b> — los eslabones "
+                    "se solapan y a veces van al revés; y si el capex se recorta, lo que más cae es justo el final de la cadena, que es "
+                    "donde está la beta. Falta el eslabón de <b>equipos</b> (ASML/LRCX/AMAT): no hay ETF de equipos semi en tu universo "
+                    "UCITS, habría que montarlo con acciones sueltas como el sintético de FIW. No es asesoramiento.</div></div>")
     # ---- RELOJ DEL CICLO ECONOMICO ----
     try:
         cyc = compute_cycle_phase(rrg, scores or [])
@@ -9405,6 +9584,21 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                     _hu = "".join(f"<li style='margin:1px 0'>{h}</li>" for h in (_a.get("huellas") or [])) or "<li>—</li>"
                     _vs = (f" · vs {BENCH} <b style='color:{GRN if (_a.get('vs') or 0) > 0 else RED}'>{_a['vs']:+.1f}</b>"
                            if _a.get("vs") is not None else "")
+                    _mc = _a.get("macro") or {}
+                    _mtxt = ""
+                    if _mc:
+                        _u = _mc.get("usd"); _ch = _mc.get("china")
+                        _partes = []
+                        if _u:
+                            _partes.append(f"<span style='color:{GRN if _u == 'baja' else AMB}'>dólar {_u}</span>")
+                        if _ch:
+                            _cc = GRN if _ch == "fuerte" else (AMB if _ch == "mixta" else RED)
+                            _partes.append(f"<span style='color:{_cc}'>China {_ch}</span>")
+                        if _mc.get("eslabon"):
+                            _partes.append(f"<span style='color:#8FA3C0'>lideraba {esc(str(_mc['eslabon']))}</span>")
+                        if _partes:
+                            _mtxt = ("<div style='font-size:10.5px;color:#7A8AA3;margin-top:3px'>📌 macro al abrir la ficha: "
+                                     + " · ".join(_partes) + "</div>")
                     _b1 += (f"<div style='border-left:3px solid {_rc};background:#0D111A;border-radius:6px;padding:8px 10px;margin:7px 0'>"
                             f"<div style='display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px'>"
                             f"<span><b style='color:{CYN};font-size:14px'>{_a['sym']}</b> "
@@ -9413,6 +9607,7 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                             f"<div style='font-size:11px;color:#93A4BC;margin-top:3px'>"
                             f"caída {_a.get('caida')}% desde máximos · CMF {_a.get('cmf')} · silencio {_a.get('vr')}× · patrón {_a.get('pts')}/10</div>"
                             f"<ul style='margin:4px 0 2px 16px;padding:0;font-size:11px;color:#B9C6D8'>{_hu}</ul>"
+                            + _mtxt +
                             f"<div style='font-size:11px;margin-top:3px'>"
                             + (f"<b style='color:{RED}'>✗ INVALIDADA</b>: perdió {_a.get('inval')} — la base se rompió, la tesis queda anulada."
                                if _a.get("roto") else
@@ -9481,6 +9676,24 @@ def build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred
                             "<b>en el giro</b> (🌅 DESPERTANDO) o incluso antes (🌱 PRE-DESPERTAR), no cuando el movimiento ya está maduro. "
                             "Esta tabla es la que la confirma o la desmiente con tus propios datos. Con pocas fichas todavía no dice nada: "
                             "déjala acumular.</div>")
+                _pd = _lb.get("pordolar") or {}
+                if _pd:
+                    _fd = ""
+                    for _dn, _dv in _pd.items():
+                        _dc = GRN if _dv["p"] >= 60 else (AMB if _dv["p"] >= 45 else RED)
+                        _fd += (f"<tr><td style='color:#CDE3FF'>{'📉' if _dn == 'baja' else '📈'} dólar {_dn}</td>"
+                                f"<td class='r'><b style='color:{_dc}'>{_dv['p']}%</b></td>"
+                                f"<td class='r'>{_dv['avg']:+.1f}%</td>"
+                                f"<td class='r' style='color:#667'>{_dv['gan']}/{_dv['n']}</td></tr>")
+                    _b3 += ("<div style='color:#777;font-size:10px;letter-spacing:1px;margin:10px 0 3px'>¿IMPORTA EL DÓLAR? — "
+                            "RENDIMIENTO SEGÚN EL MACRO DEL DÍA DE LA FICHA</div>"
+                            "<table style='width:100%;font-size:11.5px'><tr style='color:#777;font-size:10px'>"
+                            "<td>DÓLAR AL ABRIR LA FICHA</td><td class='r'>ACIERTO</td><td class='r'>MEDIA 4 SEM</td><td class='r'>N</td></tr>"
+                            + _fd + "</table>"
+                            "<div style='font-size:10px;color:#666;margin-top:3px'>La teoría dice que mineras y emergentes lo hacen "
+                            "peor con el dólar fuerte. Aquí se comprueba con TUS fichas. Ojo: la relación dólar-materias primas es fuerte "
+                            "pero <b>se rompe</b> (en 2022 subieron los dos a la vez), por eso el macro va como <b>contexto y no como veto</b> — "
+                            "un filtro duro te dejaría fuera de la buena algún día.</div>")
                 if not _lb["maduro"]:
                     _b3 += (f"<div style='background:{AMB}18;border:1px solid {AMB}55;border-radius:6px;padding:7px 9px;margin-top:8px;font-size:11px;color:{AMB}'>"
                             f"⚠ Muestra corta: {_lb['n']} fichas maduras (el IC va de {_lb['lo']}% a {_lb['hi']}%, que es enorme). "
@@ -10095,6 +10308,13 @@ def main():
     # --- CENTINELA y compañía ANTES del snapshot: así la IA automática conoce el régimen ---
     _giro = compute_giro_intradia(daily, rrg)
     _suelo = None
+    _cascada = None
+    try:
+        _cascada = compute_cascada(df, rrg, flow)
+        if _cascada:
+            print(f"  🔗 Cascada IA: lidera {_cascada['lider_corto']} — {_cascada['sentido']}")
+    except Exception as _e_casc:
+        _avisar("cascada", f"mapa de cascada IA no disponible: {_e_casc}")
     try:
         _suelo = compute_suelo(df, rrg, scores, flow, meanrev)
     except Exception:
@@ -10102,7 +10322,8 @@ def main():
     _despertares = None
     try:
         _ult_cierre = str((daily.get(BENCH).index[-1].date()) if daily.get(BENCH) is not None else df.index[-1].date())
-        _despertares = update_despertares(_suelo, daily, _ult_cierre, bench=BENCH)
+        _macro_hoy = _sello_macro(df, rrg, flow, _cascada)
+        _despertares = update_despertares(_suelo, daily, _ult_cierre, bench=BENCH, macro=_macro_hoy)
         if _despertares:
             _lb = _despertares.get("libro")
             print(f"  📒 Libro de despertares: {len(_despertares['activas'])} fichas activas · "
@@ -10247,7 +10468,7 @@ def main():
             print("\nAviso enviado.")
 
     html = build_html(df, rrg, alerts, breadth, risk, regime, buy, avoid, sources, fred, flow=flow, bt=bt,
-                      dd=dd, dd_meta=dd_meta, plan=plan, fx=fx, long_src=long_src, ai_text=ai_text, leaders=leaders, leaders_n=leaders_n, bt2=bt2, heatmap=heatmap, scores=scores, probs=probs, season=season, early=early, sector_breadth=sector_breadth, meanrev=meanrev, nq_close=nq_close, fg_idx=fg_idx, spy_flow=spy_flow, watch=watch, giro=_giro, desks=_desks, dix=_dix, suelo_pre=_suelo, centinela=_centinela, graduados=_graduados, daily=daily, ia_auto=ia_auto, tau=tau, analogos=analogos, es_fut=es_fut, options=options, despertares=_despertares)
+                      dd=dd, dd_meta=dd_meta, plan=plan, fx=fx, long_src=long_src, ai_text=ai_text, leaders=leaders, leaders_n=leaders_n, bt2=bt2, heatmap=heatmap, scores=scores, probs=probs, season=season, early=early, sector_breadth=sector_breadth, meanrev=meanrev, nq_close=nq_close, fg_idx=fg_idx, spy_flow=spy_flow, watch=watch, giro=_giro, desks=_desks, dix=_dix, suelo_pre=_suelo, centinela=_centinela, graduados=_graduados, daily=daily, ia_auto=ia_auto, tau=tau, analogos=analogos, es_fut=es_fut, options=options, despertares=_despertares, cascada=_cascada)
     os.makedirs(SITE_DIR, exist_ok=True)
     # copiar archivos estaticos (iconos, manifest, service worker) al sitio
     if os.path.isdir(STATIC_DIR):
