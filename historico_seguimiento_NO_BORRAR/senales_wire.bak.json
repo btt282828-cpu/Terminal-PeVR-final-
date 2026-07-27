@@ -970,5 +970,173 @@
 "tag": "EARLY",
 "sym": "GDX",
 "dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "RÉGIMEN",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-07-27",
+"tag": "CLÍMAX",
+"sym": "XRT",
+"dir": -1
+},
+{
+"date": "2026-07-27",
+"tag": "CLÍMAX",
+"sym": "INDA",
+"dir": -1
+},
+{
+"date": "2026-07-27",
+"tag": "CLÍMAX",
+"sym": "XLP",
+"dir": -1
+},
+{
+"date": "2026-07-27",
+"tag": "CAPITUL",
+"sym": "XLY",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "CAPITUL",
+"sym": "XLC",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "CAPITUL",
+"sym": "MAGS",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "NOCTURNO",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "NOCTURNO",
+"sym": "EWP",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "GRADUADO",
+"sym": "SIL",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "GRADUADO",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "GRADUADO",
+"sym": "GDX",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "GRADUADO",
+"sym": "GLD",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "GIRO",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-07-27",
+"tag": "GIRO",
+"sym": "ITB",
+"dir": -1
+},
+{
+"date": "2026-07-27",
+"tag": "GIRO",
+"sym": "ICLN",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "GIRO",
+"sym": "CIBR",
+"dir": -1
+},
+{
+"date": "2026-07-27",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-07-27",
+"tag": "FLOW",
+"sym": "XLP",
+"dir": -1
+},
+{
+"date": "2026-07-27",
+"tag": "FLOW",
+"sym": "XLRE",
+"dir": -1
+},
+{
+"date": "2026-07-27",
+"tag": "0/3",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "0/3",
+"sym": "URA",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "0/3",
+"sym": "COPX",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "SUELO",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "SUELO",
+"sym": "COPX",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "EARLY",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "EARLY",
+"sym": "XME",
+"dir": 1
+},
+{
+"date": "2026-07-27",
+"tag": "EARLY",
+"sym": "URA",
+"dir": 1
 }
 ]

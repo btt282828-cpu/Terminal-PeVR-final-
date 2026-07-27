@@ -138,5 +138,34 @@
 "px0": 28.56,
 "inval": 27.4,
 "cerrada": false
+},
+{
+"date": "2026-07-27",
+"sym": "BOTZ",
+"fase": "DESPERTANDO",
+"pts": 7,
+"pre": 0,
+"caida": -17.1,
+"cmf": 0.044,
+"sil": 2,
+"vr": 0.8,
+"huellas": [
+"16 pts bajo su media histórica",
+"volumen 0.80× (poca atención)",
+"1/3 estructurales",
+"GIRO VERTICAL 3.1× (impulso +1.9 en 3s)"
+],
+"px0": 34.34,
+"inval": 33.22,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 97.6,
+"usd_cmf": 0.269,
+"china": "fuerte",
+"china_cmf": -0.015,
+"eslabon": "C1-SILICIO",
+"cascada": "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
+}
 }
 ]
