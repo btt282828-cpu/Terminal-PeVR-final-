@@ -167,5 +167,34 @@
 "eslabon": "C1-SILICIO",
 "cascada": "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
 }
+},
+{
+"date": "2026-07-28",
+"sym": "XLB",
+"fase": "DESPERTANDO",
+"pts": 6,
+"pre": 2,
+"caida": -1.2,
+"cmf": 0.019,
+"sil": 1,
+"vr": 0.99,
+"huellas": [
+"volumen 0.99×",
+"10 semanas dormido en Rezagado",
+"GIRO VERTICAL 2.6× (impulso +1.5 en 3s)",
+"precio aún quieto (+0.6% en 4s): anticipación"
+],
+"px0": 52.34,
+"inval": 48.53,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 97.6,
+"usd_cmf": 0.332,
+"china": "fuerte",
+"china_cmf": 0.004,
+"eslabon": "C1-SILICIO",
+"cascada": "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
+}
 }
 ]
