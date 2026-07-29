@@ -1264,5 +1264,149 @@
 "tag": "EARLY",
 "sym": "URA",
 "dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "RÉGIMEN",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-07-29",
+"tag": "CLÍMAX",
+"sym": "FIW",
+"dir": -1
+},
+{
+"date": "2026-07-29",
+"tag": "CAPITUL",
+"sym": "TLT",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "CAPITUL",
+"sym": "XLI",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "CAPITUL",
+"sym": "PAVE",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "NOCTURNO",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "GRADUADO",
+"sym": "SIL",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "GRADUADO",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "GRADUADO",
+"sym": "GLD",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "GRADUADO",
+"sym": "GDX",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "GIRO",
+"sym": "XLE",
+"dir": -1
+},
+{
+"date": "2026-07-29",
+"tag": "GIRO",
+"sym": "OIH",
+"dir": -1
+},
+{
+"date": "2026-07-29",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-07-29",
+"tag": "FLOW",
+"sym": "XLV",
+"dir": -1
+},
+{
+"date": "2026-07-29",
+"tag": "FLOW",
+"sym": "XLP",
+"dir": -1
+},
+{
+"date": "2026-07-29",
+"tag": "FLOW",
+"sym": "XLRE",
+"dir": -1
+},
+{
+"date": "2026-07-29",
+"tag": "0/3",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "0/3",
+"sym": "COPX",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "0/3",
+"sym": "XOP",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "SUELO",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "SUELO",
+"sym": "COPX",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "EARLY",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "EARLY",
+"sym": "XME",
+"dir": 1
+},
+{
+"date": "2026-07-29",
+"tag": "EARLY",
+"sym": "URA",
+"dir": 1
 }
 ]
