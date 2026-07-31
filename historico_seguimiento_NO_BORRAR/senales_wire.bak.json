@@ -1576,5 +1576,179 @@
 "tag": "EARLY",
 "sym": "URA",
 "dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "RÉGIMEN",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "CLÍMAX",
+"sym": "EWJ",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "CLÍMAX",
+"sym": "GRID",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "CLÍMAX",
+"sym": "EWP",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "CAPITUL",
+"sym": "UUP",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "CAPITUL",
+"sym": "TLT",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "CAPITUL",
+"sym": "XLI",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "NOCTURNO",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "GRADUADO",
+"sym": "BOTZ",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "GRADUADO",
+"sym": "SIL",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "GRADUADO",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "GRADUADO",
+"sym": "GLD",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "GIRO",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "GIRO",
+"sym": "SOXX",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "GIRO",
+"sym": "HYDR",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "GIRO",
+"sym": "SMH",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "FLOW",
+"sym": "XLV",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "FLOW",
+"sym": "XLP",
+"dir": -1
+},
+{
+"date": "2026-07-31",
+"tag": "0/3",
+"sym": "XME",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "0/3",
+"sym": "SIL",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "0/3",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "SUELO",
+"sym": "XME",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "SUELO",
+"sym": "URA",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "SUELO",
+"sym": "ARKF",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "SUELO",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "EARLY",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "EARLY",
+"sym": "XME",
+"dir": 1
+},
+{
+"date": "2026-07-31",
+"tag": "EARLY",
+"sym": "URA",
+"dir": 1
 }
 ]
