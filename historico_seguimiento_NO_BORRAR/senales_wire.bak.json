@@ -1718,12 +1718,6 @@
 {
 "date": "2026-07-31",
 "tag": "SUELO",
-"sym": "URA",
-"dir": 1
-},
-{
-"date": "2026-07-31",
-"tag": "SUELO",
 "sym": "ARKF",
 "dir": 1
 },
