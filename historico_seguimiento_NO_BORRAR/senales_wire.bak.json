@@ -1738,5 +1738,173 @@
 "tag": "EARLY",
 "sym": "URA",
 "dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "RÉGIMEN",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "CLÍMAX",
+"sym": "EWJ",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "CLÍMAX",
+"sym": "GRID",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "CLÍMAX",
+"sym": "EWP",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "CAPITUL",
+"sym": "UUP",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "CAPITUL",
+"sym": "XLC",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "CAPITUL",
+"sym": "MOO",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "NOCTURNO",
+"sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "GRADUADO",
+"sym": "URA",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "GRADUADO",
+"sym": "EWZ",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "GRADUADO",
+"sym": "BOTZ",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "GRADUADO",
+"sym": "SIL",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "GIRO",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "GIRO",
+"sym": "EWY",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "GIRO",
+"sym": "URA",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "GIRO",
+"sym": "XBI",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "FLOW",
+"sym": "XLV",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "FLOW",
+"sym": "XLP",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "FLOW",
+"sym": "INDA",
+"dir": -1
+},
+{
+"date": "2026-08-03",
+"tag": "0/3",
+"sym": "COPX",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "0/3",
+"sym": "XME",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "0/3",
+"sym": "URA",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "SUELO",
+"sym": "COPX",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "SUELO",
+"sym": "XME",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "EARLY",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "EARLY",
+"sym": "XME",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "EARLY",
+"sym": "SIL",
+"dir": 1
 }
 ]
