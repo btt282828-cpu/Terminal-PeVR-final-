@@ -1772,12 +1772,6 @@
 {
 "date": "2026-08-03",
 "tag": "CAPITUL",
-"sym": "XLC",
-"dir": 1
-},
-{
-"date": "2026-08-03",
-"tag": "CAPITUL",
 "sym": "MOO",
 "dir": 1
 },
@@ -1785,6 +1779,12 @@
 "date": "2026-08-03",
 "tag": "NOCTURNO",
 "sym": "FXI",
+"dir": 1
+},
+{
+"date": "2026-08-03",
+"tag": "NOCTURNO",
+"sym": "INDA",
 "dir": 1
 },
 {
@@ -1802,38 +1802,32 @@
 {
 "date": "2026-08-03",
 "tag": "GRADUADO",
-"sym": "BOTZ",
-"dir": 1
-},
-{
-"date": "2026-08-03",
-"tag": "GRADUADO",
 "sym": "SIL",
 "dir": 1
 },
 {
 "date": "2026-08-03",
-"tag": "GIRO",
-"sym": "MERCADO",
-"dir": -1
+"tag": "GRADUADO",
+"sym": "BOTZ",
+"dir": 1
 },
 {
 "date": "2026-08-03",
 "tag": "GIRO",
-"sym": "EWY",
-"dir": -1
+"sym": "SOXX",
+"dir": 1
 },
 {
 "date": "2026-08-03",
 "tag": "GIRO",
-"sym": "URA",
-"dir": -1
+"sym": "SLV",
+"dir": 1
 },
 {
 "date": "2026-08-03",
 "tag": "GIRO",
-"sym": "XBI",
-"dir": -1
+"sym": "SMH",
+"dir": 1
 },
 {
 "date": "2026-08-03",
@@ -1868,19 +1862,13 @@
 {
 "date": "2026-08-03",
 "tag": "0/3",
-"sym": "XME",
-"dir": 1
-},
-{
-"date": "2026-08-03",
-"tag": "0/3",
 "sym": "URA",
 "dir": 1
 },
 {
 "date": "2026-08-03",
-"tag": "SUELO",
-"sym": "COPX",
+"tag": "0/3",
+"sym": "XME",
 "dir": 1
 },
 {
