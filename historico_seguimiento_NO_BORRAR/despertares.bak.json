@@ -312,5 +312,34 @@
 "eslabon": "C1-SILICIO",
 "cascada": "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
 }
+},
+{
+"date": "2026-08-04",
+"sym": "ARKF",
+"fase": "PRE-DESPERTAR",
+"pts": 9,
+"pre": 3,
+"caida": -27.2,
+"cmf": 0.229,
+"sil": 1,
+"vr": 0.96,
+"huellas": [
+"−27% de su máx 52s",
+"23 pts bajo su media histórica",
+"volumen 0.96×",
+"9 semanas dormido en Rezagado"
+],
+"px0": 42.0,
+"inval": 38.29,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 96.9,
+"usd_cmf": 0.147,
+"china": "fuerte",
+"china_cmf": 0.06,
+"eslabon": "C1-SILICIO",
+"cascada": "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
+}
 }
 ]
