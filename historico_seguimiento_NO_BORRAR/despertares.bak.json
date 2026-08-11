@@ -341,5 +341,62 @@
 "eslabon": "C1-SILICIO",
 "cascada": "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
 }
+},
+{
+"date": "2026-08-11",
+"sym": "DRIV",
+"fase": "DESPERTANDO",
+"pts": 6,
+"pre": 0,
+"caida": -14.4,
+"cmf": 0.251,
+"sil": 2,
+"vr": 0.82,
+"huellas": [
+"volumen 0.82× (poca atención)",
+"1/3 estructurales",
+"impulso girando (+1.6 en 3s)",
+"CMF>+0.05: el dinero ya ENTRA"
+],
+"px0": 35.54,
+"inval": 31.0,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 96.6,
+"usd_cmf": -0.039,
+"china": "fuerte",
+"china_cmf": 0.12,
+"eslabon": "C1-SILICIO",
+"cascada": "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
+}
+},
+{
+"date": "2026-08-11",
+"sym": "ARKK",
+"fase": "DESPERTANDO",
+"pts": 6,
+"pre": 0,
+"caida": -9.8,
+"cmf": 0.057,
+"sil": 2,
+"vr": 0.92,
+"huellas": [
+"volumen 0.92× (poca atención)",
+"GIRO VERTICAL 2.0× (impulso +1.6 en 3s)",
+"CMF>+0.05: el dinero ya ENTRA"
+],
+"px0": 80.6,
+"inval": 68.46,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 96.6,
+"usd_cmf": -0.039,
+"china": "fuerte",
+"china_cmf": 0.12,
+"eslabon": "C1-SILICIO",
+"cascada": "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
+}
 }
 ]
