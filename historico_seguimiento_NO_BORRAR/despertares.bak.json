@@ -17,7 +17,7 @@
 ],
 "px0": 36.65,
 "inval": 32.29,
-"cerrada": false
+"cerrada": true
 },
 {
 "date": "2026-07-23",
@@ -57,7 +57,7 @@
 ],
 "px0": 41.13,
 "inval": 37.51,
-"cerrada": false
+"cerrada": true
 },
 {
 "date": "2026-07-23",
@@ -77,7 +77,7 @@
 ],
 "px0": 36.17,
 "inval": 33.15,
-"cerrada": false
+"cerrada": true
 },
 {
 "date": "2026-07-23",
@@ -117,7 +117,7 @@
 ],
 "px0": 78.37,
 "inval": 70.85,
-"cerrada": false
+"cerrada": true
 },
 {
 "date": "2026-07-23",
@@ -137,7 +137,7 @@
 ],
 "px0": 28.56,
 "inval": 27.4,
-"cerrada": false
+"cerrada": true
 },
 {
 "date": "2026-07-27",
