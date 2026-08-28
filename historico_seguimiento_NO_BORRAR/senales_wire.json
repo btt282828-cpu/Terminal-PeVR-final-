@@ -4090,5 +4090,125 @@
 "tag": "EARLY",
 "sym": "SLV",
 "dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "CLÍMAX",
+"sym": "CIBR",
+"dir": -1
+},
+{
+"date": "2026-08-27",
+"tag": "CLÍMAX",
+"sym": "IGV",
+"dir": -1
+},
+{
+"date": "2026-08-27",
+"tag": "CLÍMAX",
+"sym": "SKYY",
+"dir": -1
+},
+{
+"date": "2026-08-27",
+"tag": "NOCTURNO",
+"sym": "EWY",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "NOCTURNO",
+"sym": "EEM",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "NOCTURNO",
+"sym": "EWP",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "NOCTURNO",
+"sym": "EWZ",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "GRADUADO",
+"sym": "XLU",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "GRADUADO",
+"sym": "IBIT",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "GRADUADO",
+"sym": "ARKF",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "GRADUADO",
+"sym": "URA",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "GIRO",
+"sym": "HYDR",
+"dir": -1
+},
+{
+"date": "2026-08-27",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-08-27",
+"tag": "FLOW",
+"sym": "EWP",
+"dir": -1
+},
+{
+"date": "2026-08-27",
+"tag": "FLOW",
+"sym": "EWJ",
+"dir": -1
+},
+{
+"date": "2026-08-27",
+"tag": "0/3",
+"sym": "EEM",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "0/3",
+"sym": "LIT",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "EARLY",
+"sym": "TAN",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "EARLY",
+"sym": "ARKX",
+"dir": 1
+},
+{
+"date": "2026-08-27",
+"tag": "EARLY",
+"sym": "SLV",
+"dir": 1
 }
 ]
