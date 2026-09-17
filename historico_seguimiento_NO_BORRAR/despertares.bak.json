@@ -417,7 +417,7 @@
 ],
 "px0": 426.6,
 "inval": 356.9,
-"cerrada": false,
+"cerrada": true,
 "macro": {
 "usd": "sube",
 "usd_ratio": 96.4,
@@ -445,7 +445,7 @@
 ],
 "px0": 67.32,
 "inval": 59.24,
-"cerrada": false,
+"cerrada": true,
 "macro": {
 "usd": "sube",
 "usd_ratio": 96.4,
