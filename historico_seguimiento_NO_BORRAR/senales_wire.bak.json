@@ -6376,5 +6376,173 @@
 "tag": "EARLY",
 "sym": "FAN",
 "dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "RÉGIMEN",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-09-23",
+"tag": "CLÍMAX",
+"sym": "XLC",
+"dir": -1
+},
+{
+"date": "2026-09-23",
+"tag": "CLÍMAX",
+"sym": "IBIT",
+"dir": -1
+},
+{
+"date": "2026-09-23",
+"tag": "CLÍMAX",
+"sym": "MAGS",
+"dir": -1
+},
+{
+"date": "2026-09-23",
+"tag": "CAPITUL",
+"sym": "HYG",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "CAPITUL",
+"sym": "EMB",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "CAPITUL",
+"sym": "LQD",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "NOCTURNO",
+"sym": "EWJ",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "NOCTURNO",
+"sym": "EWY",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "NOCTURNO",
+"sym": "EEM",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "GRADUADO",
+"sym": "GRID",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "GRADUADO",
+"sym": "ICLN",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "GRADUADO",
+"sym": "LIT",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "GRADUADO",
+"sym": "TAN",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "GIRO",
+"sym": "XBI",
+"dir": -1
+},
+{
+"date": "2026-09-23",
+"tag": "GIRO",
+"sym": "ITB",
+"dir": -1
+},
+{
+"date": "2026-09-23",
+"tag": "GIRO",
+"sym": "HYDR",
+"dir": -1
+},
+{
+"date": "2026-09-23",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-09-23",
+"tag": "FLOW",
+"sym": "XLC",
+"dir": -1
+},
+{
+"date": "2026-09-23",
+"tag": "FLOW",
+"sym": "EWJ",
+"dir": -1
+},
+{
+"date": "2026-09-23",
+"tag": "0/3",
+"sym": "ICLN",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "SUELO",
+"sym": "EWG",
+"dir": 0
+},
+{
+"date": "2026-09-23",
+"tag": "SUELO",
+"sym": "DRIV",
+"dir": 0
+},
+{
+"date": "2026-09-23",
+"tag": "SUELO",
+"sym": "ITB",
+"dir": 0
+},
+{
+"date": "2026-09-23",
+"tag": "SUELO",
+"sym": "PAVE",
+"dir": 0
+},
+{
+"date": "2026-09-23",
+"tag": "EARLY",
+"sym": "TAN",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "EARLY",
+"sym": "PAVE",
+"dir": 1
+},
+{
+"date": "2026-09-23",
+"tag": "EARLY",
+"sym": "FAN",
+"dir": 1
 }
 ]
