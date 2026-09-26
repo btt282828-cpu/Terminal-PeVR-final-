@@ -474,7 +474,7 @@
 ],
 "px0": 45.36,
 "inval": 42.76,
-"cerrada": false,
+"cerrada": true,
 "macro": {
 "usd": "sube",
 "usd_ratio": 96.5,
@@ -510,6 +510,35 @@
 "usd_cmf": 0.266,
 "china": "mixta",
 "china_cmf": -0.144,
+"eslabon": "C1-SILICIO",
+"cascada": "el dinero SUBE hacia el principio (vuelve a chips)"
+}
+},
+{
+"date": "2026-09-25",
+"sym": "PAVE",
+"fase": "DESPERTANDO",
+"pts": 8,
+"pre": 0,
+"caida": -9.6,
+"cmf": -0.012,
+"sil": 2,
+"vr": 0.85,
+"huellas": [
+"volumen 0.85× (poca atención)",
+"9 semanas dormido en Rezagado",
+"0/3 estructurales (64-65% hist. a 4 sem)",
+"GIRO VERTICAL 7.6× (impulso +4.5 en 3s)"
+],
+"px0": 53.07,
+"inval": 51.17,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 97.3,
+"usd_cmf": 0.494,
+"china": "mixta",
+"china_cmf": -0.269,
 "eslabon": "C1-SILICIO",
 "cascada": "el dinero SUBE hacia el principio (vuelve a chips)"
 }
