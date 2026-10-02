@@ -7084,5 +7084,95 @@
 "tag": "EARLY",
 "sym": "FAN",
 "dir": 1
+},
+{
+"date": "2026-10-02",
+"tag": "RÉGIMEN",
+"sym": "MERCADO",
+"dir": -1
+},
+{
+"date": "2026-10-02",
+"tag": "CAPITUL",
+"sym": "EWP",
+"dir": 1
+},
+{
+"date": "2026-10-02",
+"tag": "GRADUADO",
+"sym": "PAVE",
+"dir": 1
+},
+{
+"date": "2026-10-02",
+"tag": "GRADUADO",
+"sym": "GRID",
+"dir": 1
+},
+{
+"date": "2026-10-02",
+"tag": "GRADUADO",
+"sym": "LIT",
+"dir": 1
+},
+{
+"date": "2026-10-02",
+"tag": "GRADUADO",
+"sym": "ICLN",
+"dir": 1
+},
+{
+"date": "2026-10-02",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-10-02",
+"tag": "FLOW",
+"sym": "XLV",
+"dir": -1
+},
+{
+"date": "2026-10-02",
+"tag": "0/3",
+"sym": "PAVE",
+"dir": 1
+},
+{
+"date": "2026-10-02",
+"tag": "SUELO",
+"sym": "HYDR",
+"dir": 0
+},
+{
+"date": "2026-10-02",
+"tag": "SUELO",
+"sym": "KWEB",
+"dir": 0
+},
+{
+"date": "2026-10-02",
+"tag": "SUELO",
+"sym": "INDA",
+"dir": 0
+},
+{
+"date": "2026-10-02",
+"tag": "EARLY",
+"sym": "TAN",
+"dir": 1
+},
+{
+"date": "2026-10-02",
+"tag": "EARLY",
+"sym": "PAVE",
+"dir": 1
+},
+{
+"date": "2026-10-02",
+"tag": "EARLY",
+"sym": "FAN",
+"dir": 1
 }
 ]
