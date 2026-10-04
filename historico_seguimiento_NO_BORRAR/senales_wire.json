@@ -7099,6 +7099,12 @@
 },
 {
 "date": "2026-10-02",
+"tag": "NOCTURNO",
+"sym": "EWY",
+"dir": 1
+},
+{
+"date": "2026-10-02",
 "tag": "GRADUADO",
 "sym": "PAVE",
 "dir": 1
@@ -7123,6 +7129,24 @@
 },
 {
 "date": "2026-10-02",
+"tag": "GIRO",
+"sym": "SOXX",
+"dir": -1
+},
+{
+"date": "2026-10-02",
+"tag": "GIRO",
+"sym": "SMH",
+"dir": -1
+},
+{
+"date": "2026-10-02",
+"tag": "GIRO",
+"sym": "IBIT",
+"dir": -1
+},
+{
+"date": "2026-10-02",
 "tag": "RISK",
 "sym": "XTB",
 "dir": -1
@@ -7142,12 +7166,6 @@
 {
 "date": "2026-10-02",
 "tag": "SUELO",
-"sym": "HYDR",
-"dir": 0
-},
-{
-"date": "2026-10-02",
-"tag": "SUELO",
 "sym": "KWEB",
 "dir": 0
 },
@@ -7155,6 +7173,12 @@
 "date": "2026-10-02",
 "tag": "SUELO",
 "sym": "INDA",
+"dir": 0
+},
+{
+"date": "2026-10-02",
+"tag": "SUELO",
+"sym": "FIW",
 "dir": 0
 },
 {
