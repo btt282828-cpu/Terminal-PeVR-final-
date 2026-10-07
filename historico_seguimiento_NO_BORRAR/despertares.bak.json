@@ -542,5 +542,34 @@
 "eslabon": "C1-SILICIO",
 "cascada": "el dinero SUBE hacia el principio (vuelve a chips)"
 }
+},
+{
+"date": "2026-10-06",
+"sym": "XLI",
+"fase": "DESPERTANDO",
+"pts": 8,
+"pre": 1,
+"caida": -7.8,
+"cmf": -0.029,
+"sil": 1,
+"vr": 0.95,
+"huellas": [
+"volumen 0.95×",
+"8 semanas dormido en Rezagado",
+"0/3 estructurales (64-65% hist. a 4 sem)",
+"GIRO VERTICAL 4.2× (impulso +2.5 en 3s)"
+],
+"px0": 171.58,
+"inval": 161.97,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 97.4,
+"usd_cmf": 0.225,
+"china": "floja",
+"china_cmf": -0.212,
+"eslabon": "C1-SILICIO",
+"cascada": "el dinero SUBE hacia el principio (vuelve a chips)"
+}
 }
 ]
