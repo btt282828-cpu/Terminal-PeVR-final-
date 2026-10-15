@@ -629,5 +629,34 @@
 "eslabon": "C1-SILICIO",
 "cascada": "sin sentido claro"
 }
+},
+{
+"date": "2026-10-14",
+"sym": "XLY",
+"fase": "DESPERTANDO",
+"pts": 8,
+"pre": 1,
+"caida": -9.8,
+"cmf": 0.03,
+"sil": 1,
+"vr": 0.96,
+"huellas": [
+"16 pts bajo su media histórica",
+"volumen 0.96×",
+"0/3 estructurales (64-65% hist. a 4 sem)",
+"GIRO VERTICAL 3.4× (impulso +2.1 en 3s)"
+],
+"px0": 111.5,
+"inval": 105.55,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 97.8,
+"usd_cmf": -0.045,
+"china": "floja",
+"china_cmf": 0.056,
+"eslabon": "C1-SILICIO",
+"cascada": "sin sentido claro"
+}
 }
 ]

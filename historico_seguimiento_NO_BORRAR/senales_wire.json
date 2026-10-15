@@ -7947,7 +7947,7 @@
 "date": "2026-10-14",
 "tag": "RÉGIMEN",
 "sym": "MERCADO",
-"dir": -1
+"dir": 0
 },
 {
 "date": "2026-10-14",
@@ -7958,14 +7958,32 @@
 {
 "date": "2026-10-14",
 "tag": "CLÍMAX",
-"sym": "XLE",
+"sym": "XLV",
 "dir": -1
 },
 {
 "date": "2026-10-14",
 "tag": "CLÍMAX",
-"sym": "XLRE",
+"sym": "XLP",
 "dir": -1
+},
+{
+"date": "2026-10-14",
+"tag": "CAPITUL",
+"sym": "SLV",
+"dir": 1
+},
+{
+"date": "2026-10-14",
+"tag": "CAPITUL",
+"sym": "SKYY",
+"dir": 1
+},
+{
+"date": "2026-10-14",
+"tag": "CAPITUL",
+"sym": "IWM",
+"dir": 1
 },
 {
 "date": "2026-10-14",
@@ -7999,6 +8017,24 @@
 },
 {
 "date": "2026-10-14",
+"tag": "GIRO",
+"sym": "GLD",
+"dir": 1
+},
+{
+"date": "2026-10-14",
+"tag": "GIRO",
+"sym": "INDA",
+"dir": -1
+},
+{
+"date": "2026-10-14",
+"tag": "GIRO",
+"sym": "ITB",
+"dir": 1
+},
+{
+"date": "2026-10-14",
 "tag": "RISK",
 "sym": "XTB",
 "dir": -1
@@ -8007,6 +8043,12 @@
 "date": "2026-10-14",
 "tag": "0/3",
 "sym": "XLI",
+"dir": 1
+},
+{
+"date": "2026-10-14",
+"tag": "0/3",
+"sym": "XLY",
 "dir": 1
 },
 {
@@ -8024,8 +8066,14 @@
 {
 "date": "2026-10-14",
 "tag": "SUELO",
+"sym": "DRIV",
+"dir": 1
+},
+{
+"date": "2026-10-14",
+"tag": "SUELO",
 "sym": "XLY",
-"dir": 0
+"dir": 1
 },
 {
 "date": "2026-10-14",
@@ -8042,7 +8090,7 @@
 {
 "date": "2026-10-14",
 "tag": "EARLY",
-"sym": "HYDR",
+"sym": "ICLN",
 "dir": 1
 }
 ]
