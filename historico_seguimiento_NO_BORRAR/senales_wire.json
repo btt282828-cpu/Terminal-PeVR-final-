@@ -8060,12 +8060,6 @@
 {
 "date": "2026-10-15",
 "tag": "GRADUADO",
-"sym": "XLRE",
-"dir": 1
-},
-{
-"date": "2026-10-15",
-"tag": "GRADUADO",
 "sym": "HYDR",
 "dir": 1
 },
@@ -8083,6 +8077,12 @@
 },
 {
 "date": "2026-10-15",
+"tag": "GRADUADO",
+"sym": "ICLN",
+"dir": 1
+},
+{
+"date": "2026-10-15",
 "tag": "GIRO",
 "sym": "EWY",
 "dir": 1
@@ -8090,13 +8090,13 @@
 {
 "date": "2026-10-15",
 "tag": "GIRO",
-"sym": "SOXX",
+"sym": "HYDR",
 "dir": 1
 },
 {
 "date": "2026-10-15",
 "tag": "GIRO",
-"sym": "SMH",
+"sym": "SOXX",
 "dir": 1
 },
 {
@@ -8126,6 +8126,12 @@
 {
 "date": "2026-10-15",
 "tag": "SUELO",
+"sym": "DRIV",
+"dir": 1
+},
+{
+"date": "2026-10-15",
+"tag": "SUELO",
 "sym": "XLI",
 "dir": 1
 },
@@ -8133,12 +8139,6 @@
 "date": "2026-10-15",
 "tag": "SUELO",
 "sym": "XLY",
-"dir": 1
-},
-{
-"date": "2026-10-15",
-"tag": "SUELO",
-"sym": "DRIV",
 "dir": 1
 },
 {
@@ -8163,6 +8163,12 @@
 "date": "2026-10-15",
 "tag": "EARLY",
 "sym": "PAVE",
+"dir": 1
+},
+{
+"date": "2026-10-15",
+"tag": "SENT",
+"sym": "F&G",
 "dir": 1
 }
 ]
