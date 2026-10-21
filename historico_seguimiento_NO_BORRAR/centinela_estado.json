@@ -210,5 +210,9 @@
 {
 "date": "2026-10-16",
 "estado": "TRANSICION"
+},
+{
+"date": "2026-10-21",
+"estado": "LIQUIDEZ"
 }
 ]
