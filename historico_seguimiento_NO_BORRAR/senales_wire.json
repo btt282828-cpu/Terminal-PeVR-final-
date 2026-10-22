@@ -1,95 +1,5 @@
 [
 {
-"date": "2026-07-17",
-"tag": "RÉGIMEN",
-"sym": "MERCADO",
-"dir": -1
-},
-{
-"date": "2026-07-17",
-"tag": "CLÍMAX",
-"sym": "XLP",
-"dir": -1
-},
-{
-"date": "2026-07-17",
-"tag": "CLÍMAX",
-"sym": "KRE",
-"dir": -1
-},
-{
-"date": "2026-07-17",
-"tag": "GRADUADO",
-"sym": "FXI",
-"dir": 1
-},
-{
-"date": "2026-07-17",
-"tag": "GRADUADO",
-"sym": "XLC",
-"dir": 1
-},
-{
-"date": "2026-07-17",
-"tag": "GIRO",
-"sym": "SOXX",
-"dir": 1
-},
-{
-"date": "2026-07-17",
-"tag": "GIRO",
-"sym": "BOTZ",
-"dir": 1
-},
-{
-"date": "2026-07-17",
-"tag": "GIRO",
-"sym": "COPX",
-"dir": 1
-},
-{
-"date": "2026-07-17",
-"tag": "RISK",
-"sym": "XTB",
-"dir": -1
-},
-{
-"date": "2026-07-17",
-"tag": "0/3",
-"sym": "IBIT",
-"dir": 1
-},
-{
-"date": "2026-07-17",
-"tag": "SUELO",
-"sym": "VGK",
-"dir": 1
-},
-{
-"date": "2026-07-17",
-"tag": "SUELO",
-"sym": "IBIT",
-"dir": 1
-},
-{
-"date": "2026-07-17",
-"tag": "EARLY",
-"sym": "GDX",
-"dir": 1
-},
-{
-"date": "2026-07-17",
-"tag": "EARLY",
-"sym": "FXI",
-"dir": 1
-},
-{
-"date": "2026-07-17",
-"tag": "EARLY",
-"sym": "KWEB",
-"dir": 1
-},
-{
 "date": "2026-07-20",
 "tag": "RÉGIMEN",
 "sym": "MERCADO",
@@ -8221,6 +8131,96 @@
 },
 {
 "date": "2026-10-19",
+"tag": "EARLY",
+"sym": "XLRE",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "CAPITUL",
+"sym": "SKYY",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "CAPITUL",
+"sym": "IGV",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "NOCTURNO",
+"sym": "EWZ",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "GRADUADO",
+"sym": "DRIV",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "GRADUADO",
+"sym": "HYDR",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "GRADUADO",
+"sym": "PAVE",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "GRADUADO",
+"sym": "GRID",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "GIRO",
+"sym": "HYDR",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "GIRO",
+"sym": "LIT",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "RISK",
+"sym": "XTB",
+"dir": -1
+},
+{
+"date": "2026-10-20",
+"tag": "0/3",
+"sym": "XLI",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "0/3",
+"sym": "XLF",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "EARLY",
+"sym": "TAN",
+"dir": 1
+},
+{
+"date": "2026-10-20",
+"tag": "EARLY",
+"sym": "HYDR",
+"dir": 1
+},
+{
+"date": "2026-10-20",
 "tag": "EARLY",
 "sym": "XLRE",
 "dir": 1
