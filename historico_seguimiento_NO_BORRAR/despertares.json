@@ -716,5 +716,34 @@
 "eslabon": "C1-SILICIO",
 "cascada": "sin sentido claro"
 }
+},
+{
+"date": "2026-10-23",
+"sym": "ITB",
+"fase": "DESPERTANDO",
+"pts": 10,
+"pre": 2,
+"caida": -18.7,
+"cmf": 0.085,
+"sil": 1,
+"vr": 1.02,
+"huellas": [
+"−19% de su máx 52s",
+"18 pts bajo su media histórica",
+"volumen 1.02×",
+"8 semanas dormido en Rezagado"
+],
+"px0": 91.24,
+"inval": 80.89,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 98.1,
+"usd_cmf": -0.18,
+"china": "floja",
+"china_cmf": 0.062,
+"eslabon": "C1-SILICIO",
+"cascada": "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
+}
 }
 ]
