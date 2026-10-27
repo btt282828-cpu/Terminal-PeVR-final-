@@ -745,5 +745,121 @@
 "eslabon": "C1-SILICIO",
 "cascada": "el dinero BAJA por la cadena (rota hacia energía y materia prima)"
 }
+},
+{
+"date": "2026-10-26",
+"sym": "FIW",
+"fase": "DESPERTANDO",
+"pts": 6,
+"pre": 2,
+"caida": -4.3,
+"cmf": 0.106,
+"sil": 0,
+"vr": 1.14,
+"huellas": [
+"12 pts bajo su media histórica",
+"8 semanas dormido en Rezagado",
+"GIRO VERTICAL 3.6× (impulso +3.4 en 3s)",
+"CMF>+0.05: el dinero ya ENTRA"
+],
+"px0": 110.14,
+"inval": 100.67,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 98.6,
+"usd_cmf": -0.184,
+"china": "floja",
+"china_cmf": 0.06,
+"eslabon": "C1-SILICIO",
+"cascada": "sin sentido claro"
+}
+},
+{
+"date": "2026-10-26",
+"sym": "ITA",
+"fase": "DESPERTANDO",
+"pts": 7,
+"pre": 1,
+"caida": -18.1,
+"cmf": 0.028,
+"sil": 0,
+"vr": 1.11,
+"huellas": [
+"−18% de su máx 52s",
+"20 pts bajo su media histórica",
+"1/3 estructurales",
+"GIRO VERTICAL 5.2× (impulso +3.4 en 3s)"
+],
+"px0": 207.16,
+"inval": 196.16,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 98.6,
+"usd_cmf": -0.184,
+"china": "floja",
+"china_cmf": 0.06,
+"eslabon": "C1-SILICIO",
+"cascada": "sin sentido claro"
+}
+},
+{
+"date": "2026-10-26",
+"sym": "IWM",
+"fase": "DESPERTANDO",
+"pts": 6,
+"pre": 1,
+"caida": -9.0,
+"cmf": -0.012,
+"sil": 2,
+"vr": 0.83,
+"huellas": [
+"volumen 0.83× (poca atención)",
+"GIRO VERTICAL 6.2× (impulso +3.7 en 3s)",
+"precio aún quieto (-1.6% en 4s): anticipación",
+"CMF plano: dejó de salir"
+],
+"px0": 276.99,
+"inval": 262.33,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 98.6,
+"usd_cmf": -0.184,
+"china": "floja",
+"china_cmf": 0.06,
+"eslabon": "C1-SILICIO",
+"cascada": "sin sentido claro"
+}
+},
+{
+"date": "2026-10-26",
+"sym": "INDA",
+"fase": "DESPERTANDO",
+"pts": 9,
+"pre": 0,
+"caida": -14.8,
+"cmf": 0.112,
+"sil": 0,
+"vr": 1.12,
+"huellas": [
+"20 pts bajo su media histórica",
+"8 semanas dormido en Rezagado",
+"0/3 estructurales (64-65% hist. a 4 sem)",
+"GIRO VERTICAL 3.5× (impulso +2.1 en 3s)"
+],
+"px0": 46.59,
+"inval": 44.19,
+"cerrada": false,
+"macro": {
+"usd": "sube",
+"usd_ratio": 98.6,
+"usd_cmf": -0.184,
+"china": "floja",
+"china_cmf": 0.06,
+"eslabon": "C1-SILICIO",
+"cascada": "sin sentido claro"
+}
 }
 ]
