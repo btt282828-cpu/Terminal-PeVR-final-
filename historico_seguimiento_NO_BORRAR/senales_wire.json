@@ -7976,19 +7976,19 @@
 {
 "date": "2026-11-10",
 "tag": "CAPITUL",
-"sym": "XLK",
-"dir": 1
-},
-{
-"date": "2026-11-10",
-"tag": "CAPITUL",
-"sym": "SMH",
-"dir": 1
-},
-{
-"date": "2026-11-10",
-"tag": "CAPITUL",
 "sym": "BOTZ",
+"dir": 1
+},
+{
+"date": "2026-11-10",
+"tag": "CAPITUL",
+"sym": "MAGS",
+"dir": 1
+},
+{
+"date": "2026-11-10",
+"tag": "CAPITUL",
+"sym": "ARKK",
 "dir": 1
 },
 {
@@ -8017,14 +8017,26 @@
 },
 {
 "date": "2026-11-10",
-"tag": "RISK",
-"sym": "XTB",
-"dir": -1
+"tag": "GIRO",
+"sym": "OIH",
+"dir": 1
 },
 {
 "date": "2026-11-10",
-"tag": "FLOW",
-"sym": "XLP",
+"tag": "GIRO",
+"sym": "XLE",
+"dir": 1
+},
+{
+"date": "2026-11-10",
+"tag": "GIRO",
+"sym": "XOP",
+"dir": 1
+},
+{
+"date": "2026-11-10",
+"tag": "RISK",
+"sym": "XTB",
 "dir": -1
 },
 {
