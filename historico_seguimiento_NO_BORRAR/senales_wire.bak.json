@@ -7838,6 +7838,12 @@
 {
 "date": "2026-11-18",
 "tag": "CAPITUL",
+"sym": "COPX",
+"dir": 1
+},
+{
+"date": "2026-11-18",
+"tag": "CAPITUL",
 "sym": "TAN",
 "dir": 1
 },
@@ -7845,18 +7851,6 @@
 "date": "2026-11-18",
 "tag": "CAPITUL",
 "sym": "IBIT",
-"dir": 1
-},
-{
-"date": "2026-11-18",
-"tag": "CAPITUL",
-"sym": "DRIV",
-"dir": 1
-},
-{
-"date": "2026-11-18",
-"tag": "GRADUADO",
-"sym": "KRE",
 "dir": 1
 },
 {
@@ -7879,6 +7873,30 @@
 },
 {
 "date": "2026-11-18",
+"tag": "GRADUADO",
+"sym": "XLI",
+"dir": 1
+},
+{
+"date": "2026-11-18",
+"tag": "GIRO",
+"sym": "SMH",
+"dir": -1
+},
+{
+"date": "2026-11-18",
+"tag": "GIRO",
+"sym": "HYDR",
+"dir": -1
+},
+{
+"date": "2026-11-18",
+"tag": "GIRO",
+"sym": "SOXX",
+"dir": -1
+},
+{
+"date": "2026-11-18",
 "tag": "RISK",
 "sym": "XTB",
 "dir": -1
@@ -7886,19 +7904,7 @@
 {
 "date": "2026-11-18",
 "tag": "0/3",
-"sym": "FXI",
-"dir": 1
-},
-{
-"date": "2026-11-18",
-"tag": "SUELO",
-"sym": "FXI",
-"dir": 1
-},
-{
-"date": "2026-11-18",
-"tag": "SUELO",
-"sym": "URA",
+"sym": "EWP",
 "dir": 1
 },
 {
