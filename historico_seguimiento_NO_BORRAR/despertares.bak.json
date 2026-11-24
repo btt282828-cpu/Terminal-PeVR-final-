@@ -764,7 +764,7 @@
 ],
 "px0": 110.14,
 "inval": 100.67,
-"cerrada": false,
+"cerrada": true,
 "macro": {
 "usd": "sube",
 "usd_ratio": 98.6,
@@ -793,7 +793,7 @@
 ],
 "px0": 207.16,
 "inval": 196.16,
-"cerrada": false,
+"cerrada": true,
 "macro": {
 "usd": "sube",
 "usd_ratio": 98.6,
@@ -822,7 +822,7 @@
 ],
 "px0": 276.99,
 "inval": 262.33,
-"cerrada": false,
+"cerrada": true,
 "macro": {
 "usd": "sube",
 "usd_ratio": 98.6,
@@ -851,7 +851,7 @@
 ],
 "px0": 46.59,
 "inval": 44.19,
-"cerrada": false,
+"cerrada": true,
 "macro": {
 "usd": "sube",
 "usd_ratio": 98.6,
